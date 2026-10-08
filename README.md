@@ -63,8 +63,11 @@ Etapas 1 a 4 (abertura, seleção da demanda, imersão e preparação da entrevi
 - Giovana Alves
 - Gustavo Henrique Barreto
 - Mariana Chaves Ribeiro
+- Rafael Brecci de Souza
+- Vitor Matheus Canalli
+- Nicolas Fernandes 
 
-**Orientadores:** Prof. Raul Lopes e Paulo Cesar.
+**Orientadores:** Prof. Paulo Cesar.
 
 ## Como organizar novos arquivos
 
