@@ -1,6 +1,6 @@
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS teams (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS clients (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS clients (id INTEGER PRIMARY KEY, name TEXT NOT NULL, city TEXT, state TEXT);
 CREATE TABLE IF NOT EXISTS users (
  id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
  role TEXT NOT NULL CHECK(role IN ('attendant','supervisor','manager','client')),
@@ -13,7 +13,9 @@ CREATE TABLE IF NOT EXISTS tickets (
  subject TEXT NOT NULL, channel TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','awaiting_feedback','resolved','closed_no_response')),
  created_at TEXT NOT NULL, response_due_at TEXT NOT NULL, replied_at TEXT, solution TEXT, solution_sent_at TEXT, feedback_deadline TEXT,
  manual_status_changes INTEGER NOT NULL DEFAULT 0 CHECK(manual_status_changes BETWEEN 0 AND 1), closed_at TEXT, closure_reason TEXT,
- solution_attempt INTEGER NOT NULL DEFAULT 0, rejected_at TEXT
+ solution_attempt INTEGER NOT NULL DEFAULT 0, rejected_at TEXT,
+ priority TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low','medium','high','critical')),
+ support_level INTEGER NOT NULL DEFAULT 1 CHECK(support_level BETWEEN 1 AND 3)
 );
 CREATE INDEX IF NOT EXISTS tickets_scope_idx ON tickets(team_id,attendant_id,client_id,status);
 CREATE INDEX IF NOT EXISTS tickets_deadline_idx ON tickets(status,feedback_deadline);
@@ -47,3 +49,4 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 CREATE TABLE IF NOT EXISTS login_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, identity TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS login_attempts_idx ON login_attempts(identity,created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS clients_name_nocase ON clients(name COLLATE NOCASE);

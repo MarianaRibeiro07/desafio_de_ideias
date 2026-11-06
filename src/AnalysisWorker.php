@@ -56,6 +56,8 @@ final class AnalysisWorker {
         $result['transcription_model']=$result['transcription_model']??null;
         if($mode==='audio' && (!is_string($result['transcript']) || trim($result['transcript'])==='' || mb_strlen($result['transcript'])>16000 || !is_string($result['transcription_model']) || trim($result['transcription_model'])==='' || mb_strlen($result['transcription_model'])>180)){throw new RuntimeException('Transcricao invalida ou ausente.');}
         if($mode!=='audio'){$result['transcript']=null;$result['transcription_model']=null;}
+        foreach(['transcript','summary'] as $key){if(is_string($result[$key])){$result[$key]=App::maskSensitive($result[$key]);}}
+        foreach(['topics','evidence'] as $key){$result[$key]=array_map(App::maskSensitive(...),$result[$key]);}
         return $result;
     }
 

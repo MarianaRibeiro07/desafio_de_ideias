@@ -19,7 +19,7 @@ function signIn(string $email): void {request('GET','/api/session');$r=request('
 function pendingFeedback(string $mode='text',bool $resolved=true,int $rating=5): int {
     global $pdo;
     signIn('rafael@cti.demo');
-    $r=request('POST','/api/tickets',['client_id'=>1,'subject'=>'Teste de analise automatica VPN','channel'=>'Portal','response_due_at'=>gmdate('Y-m-d\TH:i:s\Z',time()+3600)]);
+    $r=request('POST','/api/tickets',['client_id'=>1,'subject'=>'Teste de analise automatica VPN','channel'=>'Portal','priority'=>'medium']);
     $id=$r['body']['data']['id'];
     request('POST',"/api/tickets/$id/solution",['solution'=>'Rota reconfigurada e conectividade validada.']);
     signIn('lucas@cti.demo');
@@ -101,6 +101,13 @@ try {
     check($audioWorker->processOne()['status']==='completed','Audio passa pela transcricao e classificacao');
     $row=$pdo->query("SELECT * FROM feedbacks WHERE id=$audio")->fetch();
     check($row['transcript']==='A conexao agora funciona bem.' && $row['transcription_model']==='whisper-teste','Transcricao e modelo sao armazenados');
+    $masked=pendingFeedback();
+    $pdo->exec("UPDATE feedbacks SET mode='audio',text=NULL,audio_path='teste.wav' WHERE id=$masked");
+    $maskWorker=new AnalysisWorker($pdo,$storage,fn(array $input): array=>['transcript'=>'Meu CPF e 123.456.789-09 e o telefone (11) 98765-4321, protocolo ATD-2026-0001.','sentiment'=>'neutral','confidence'=>.8,'summary'=>'Cliente informou o e-mail ana@x.com.br.','topics'=>['Conexao'],'evidence'=>['telefone 11 98765-4321'],'criticality'=>'regular','model'=>'teste-local','transcription_model'=>'whisper-teste']);
+    check($maskWorker->processOne()['status']==='completed','Audio com dados pessoais na transcricao e analisado');
+    $row=$pdo->query("SELECT * FROM feedbacks WHERE id=$masked")->fetch();
+    check($row['transcript']==='Meu CPF e [CPF omitido] e o telefone [telefone omitido], protocolo ATD-2026-0001.' && $row['summary']==='Cliente informou o e-mail [e-mail omitido].' && $row['evidence']==='["telefone [telefone omitido]"]','Worker grava transcricao, resumo e evidencias ja mascarados');
+    check(!str_contains(json_encode($row),'98765') && !str_contains(json_encode($row),'123.456'),'Nenhuma coluna do feedback de audio guarda o dado pessoal original');
     $lost=pendingFeedback();
     $pdo->exec("UPDATE feedbacks SET mode='audio',text=NULL,audio_path='../segredo.wav' WHERE id=$lost");
     check($audioWorker->processOne()['status']==='failed','Caminho de audio invalido falha sem acessar arquivo externo');

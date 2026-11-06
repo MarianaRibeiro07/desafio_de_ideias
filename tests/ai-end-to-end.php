@@ -22,7 +22,7 @@ function request(string $method,string $route,array $body=[],array $files=[]): a
 function login(string $email): void {request('GET','/api/session');$result=request('POST','/api/login',['email'=>$email,'password'=>'CtiDemo2026!']);if($result['status']!==200){throw new RuntimeException('Falha no login do teste.');}}
 function feedback(array $body,array $files=[]): int {
     login('rafael@cti.demo');
-    $ticket=request('POST','/api/tickets',['client_id'=>1,'subject'=>'Teste integrado de inteligencia artificial','channel'=>'Portal','response_due_at'=>gmdate(DATE_ATOM,time()+3600)])['body']['data']['id'];
+    $ticket=request('POST','/api/tickets',['client_id'=>1,'subject'=>'Teste integrado de inteligencia artificial','channel'=>'Portal','priority'=>'medium'])['body']['data']['id'];
     request('POST',"/api/tickets/$ticket/solution",['solution'=>'Configuracao ajustada e conectividade restabelecida.']);
     login('lucas@cti.demo');
     $result=request('POST','/api/feedbacks',['ticket_id'=>$ticket,...$body],$files);

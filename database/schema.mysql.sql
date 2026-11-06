@@ -6,7 +6,9 @@ CREATE TABLE teams (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE clients (
  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
- name VARCHAR(180) NOT NULL
+ name VARCHAR(180) NOT NULL,
+ city VARCHAR(80) NULL,
+ state CHAR(2) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE users (
  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
@@ -44,6 +46,8 @@ CREATE TABLE tickets (
  closure_reason VARCHAR(40) NULL,
  solution_attempt INT UNSIGNED NOT NULL DEFAULT 0,
  rejected_at VARCHAR(35) NULL,
+ priority VARCHAR(10) NOT NULL DEFAULT 'medium' CHECK(priority IN ('low','medium','high','critical')),
+ support_level TINYINT UNSIGNED NOT NULL DEFAULT 1 CHECK(support_level BETWEEN 1 AND 3),
  FOREIGN KEY(client_id) REFERENCES clients(id),
  FOREIGN KEY(attendant_id) REFERENCES users(id),
  FOREIGN KEY(team_id) REFERENCES teams(id),
@@ -138,3 +142,5 @@ CREATE TABLE login_attempts (
  created_at VARCHAR(35) NOT NULL,
  INDEX login_attempts_idx(identity,created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- Unicidade do nome do cliente. A collation padrao utf8mb4 do MySQL e do MariaDB ja ignora caixa (e, no MySQL 8, tambem acento).
+CREATE UNIQUE INDEX clients_name_nocase ON clients(name);

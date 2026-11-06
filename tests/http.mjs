@@ -51,10 +51,24 @@ for (const route of ['/assets/cti-oficial.png', '/assets/inter-400.ttf']) {
   check(response.status === 200 && response.data.length > 1000, `Asset local ${route}`);
 }
 await login('rafael@cti.demo');
-const created = await request('POST', '/api/tickets', { client_id: 1, subject: `QA HTTP VPN ${Date.now()}`, category_id: 1, channel: 'Portal', response_due_at: new Date(Date.now() + 86400000).toISOString() });
-check(created.status === 201, 'HTTP persiste novo atendimento');
+const created = await request('POST', '/api/tickets', { client_id: 1, subject: `QA HTTP VPN ${Date.now()}`, category_id: 1, channel: 'Portal', priority: 'high' });
+check(created.status === 201 && created.data.data.priority === 'high' && created.data.data.support_level === 1 && new Date(created.data.data.response_due_at) - new Date(created.data.data.created_at) === 3600000, 'HTTP persiste novo atendimento com prioridade e prazo calculado no servidor');
 const ticket = created.data.data.id;
 check((await request('POST', `/api/tickets/${ticket}/solution`, { solution: 'Credenciais renovadas e conexao VPN validada com o cliente.' })).status === 200, 'HTTP envia solucao e aguarda cliente');
+const clientName = `QA Cliente ${Date.now()}`;
+const newClient = await request('POST', '/api/clients', { name: clientName, city: 'Recife', state: 'PE' });
+check(newClient.status === 201 && newClient.data.data.name === clientName && newClient.data.data.city === 'Recife' && newClient.data.data.state === 'PE', 'HTTP cadastra cliente novo com cidade e UF');
+check((await request('POST', '/api/clients', { name: `${clientName} sem local` })).status === 400, 'HTTP recusa cliente sem cidade e UF');
+check((await request('POST', '/api/clients', { name: clientName.toUpperCase(), city: 'Recife', state: 'PE' })).status === 409, 'HTTP recusa cliente duplicado sem diferenciar caixa');
+const reportData = (await request('GET', '/api/reports')).data.data;
+check(reportData.agreement === undefined && ['on_time', 'late', 'awaiting_on_time', 'overdue', 'total'].every(key => Number.isInteger(reportData.deadline[key])) && ['low', 'medium', 'high', 'critical'].every(key => Number.isInteger(reportData.by_priority[key])) && ['1', '2', '3'].every(key => Number.isInteger(reportData.by_support_level[key])), 'HTTP devolve deadline, by_priority e by_support_level e nao devolve agreement');
+check(/^\d{4}-\d{2}-\d{2}$/.test(reportData.comparison.current.from) && reportData.comparison.previous.to < reportData.comparison.current.from && ['received', 'negative_percent', 'critical', 'negative'].every(key => Number.isInteger(reportData.comparison.previous[key])), 'HTTP devolve a comparacao com o periodo anterior');
+const registeredResolved = await request('POST', '/api/tickets', { client_id: newClient.data.data.id, subject: `QA HTTP resolvido ${Date.now()}`, channel: 'Telefone', priority: 'high', status: 'resolved', solution: 'Conexao restabelecida e validada durante a chamada.' });
+check(registeredResolved.status === 201 && registeredResolved.data.data.status === 'awaiting_feedback' && registeredResolved.data.data.manual_status_changes === 1, 'HTTP registra atendimento ja resolvido aguardando confirmacao');
+await login('marina@cti.demo');
+const escalated = await request('POST', `/api/tickets/${ticket}/escalate`, { level: 2 });
+check(escalated.status === 200 && escalated.data.data.support_level === 2, 'HTTP escala o atendimento para N2 como supervisor');
+check((await request('POST', `/api/tickets/${ticket}/escalate`, { level: 2 })).status === 400, 'HTTP recusa escalar para o mesmo nivel');
 await login('lucas@cti.demo');
 const tooLong = await request('POST', '/api/feedbacks', feedback(ticket, wav(61)));
 check(tooLong.status === 422 && tooLong.data.message.includes('60'), 'Multipart real rejeita WAV de 61 segundos pelo conteudo');
