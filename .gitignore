@@ -1,0 +1,4 @@
+/storage/
+/tests/artifacts/
+*.log
+/ai/node_modules/

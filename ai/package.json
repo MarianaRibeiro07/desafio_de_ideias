@@ -1,0 +1,7 @@
+{
+  "name": "cti-escuta-ai",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "dependencies": { "@huggingface/transformers": "3.8.1" }
+}
