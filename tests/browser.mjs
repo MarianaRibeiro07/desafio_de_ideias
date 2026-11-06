@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const output = path.join(root, 'storage', 'qa');
+const output = process.env.CTI_QA_OUT ?? path.join(root, 'storage', 'qa');
 const profile = path.join(output, `browser-${Date.now()}`);
 const base = process.env.CTI_BASE_URL ?? 'http://127.0.0.1:8095';
 const executable = process.env.CTI_BROWSER ?? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
@@ -16,6 +16,7 @@ let browser, socket, request = 0;
 let workflowTicket = null;
 const workflowSubject = `VPN QA navegador ${Date.now()}`;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+const visibleCols = `[...document.querySelectorAll('table')].map(t => [...t.querySelectorAll('thead th')].filter(th => th.offsetParent !== null && th.getBoundingClientRect().width > 0).length)`;
 function check(name, condition, details) {
   results.push({ name, passed: Boolean(condition), details });
   console.log(`${condition ? 'PASS' : 'FAIL'} ${name}${details === undefined ? '' : ` ${JSON.stringify(details)}`}`);
@@ -74,7 +75,8 @@ try {
     else if (message.method === 'Log.entryAdded' && message.params.entry.level === 'error') {
       const entry = message.params.entry;
       const expectedAuthentication = (entry.url?.endsWith('/api/login') || entry.url?.endsWith('/api/bootstrap')) && entry.text.includes('401');
-      if (!expectedAuthentication) errors.push({ type: 'log', details: entry });
+      const expectedConflict = entry.url?.endsWith('/api/clients') && entry.text.includes('409');
+      if (!expectedAuthentication && !expectedConflict) errors.push({ type: 'log', details: entry });
     }
   });
   await cdp('Runtime.enable');
@@ -84,7 +86,14 @@ try {
   await cdp('Page.navigate', { url: base });
   await until('!!document.querySelector("form")', 'formulario de login');
   await shot('login');
-  check('Login exibe logo oficial', await evaluate(`!![...document.images].find(img => img.src.includes('cti-oficial.png') && img.complete && img.naturalWidth > 0)`));
+  check('Login exibe logo branca sobre o azul', await evaluate(`!![...document.querySelectorAll('.login-hero img')].find(img => img.src.includes('cti-logo-branca.png') && img.complete && img.naturalWidth > 0)`));
+  check('Login sem textos de projeto academico no rodape', await evaluate(`(() => { const text = document.body.innerText; return !text.includes('Projeto integrador') && !text.includes('SENAI 2026') && !text.includes('Plataforma acadêmica') && text.includes('Conexões que importam') && text.includes('Privacidade em primeiro lugar') && [...document.querySelectorAll('.login-panel .login-footer span')][0]?.textContent.trim() === 'CTI Escuta'; })()`));
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await pause(200);
+  const loginMobile = await evaluate('({width:document.documentElement.scrollWidth,viewport:innerWidth})');
+  check('Login mobile 390 sem rolagem horizontal', loginMobile.width <= loginMobile.viewport, loginMobile);
+  await shot('login-mobile', 390);
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   const denied = await api('POST', '/api/login', { email: 'rafael@cti.demo', password: 'invalida' });
   check('HTTP recusa senha incorreta', denied.status === 401);
   const cookies = (await cdp('Network.getCookies', { urls: [base] })).cookies;
@@ -106,6 +115,26 @@ try {
       const state = await evaluate(`({title:document.querySelector('h1')?.textContent,broken:[...document.images].filter(i=>!i.complete||!i.naturalWidth).map(i=>i.getAttribute('src')),width:document.documentElement.scrollWidth,viewport:innerWidth})`);
       check(`Tela ${role}: ${link.text}`, Boolean(state.title) && state.broken.length === 0 && state.width <= state.viewport, state);
       await shot(`${role}-${index}`);
+      check(`Tabelas com no maximo 4 colunas visiveis ${role}: ${link.text}`, (await evaluate(visibleCols)).every(n => n <= 4), await evaluate(visibleCols));
+      check(`Sem concordancia IA x humano na tela ${role}: ${link.text}`, await evaluate(`!/concord/i.test(document.body.textContent) && !document.querySelector('.agreement-card')`));
+    }
+    const removedTexts = ['Ambiente acadêmico', 'Plataforma de experiência', 'Projeto SENAI', 'Conectividade / Segurança / Cloud'];
+    check(`Textos removidos ausentes ${role}`, await evaluate(`(() => { const text = document.body.innerText; return ${JSON.stringify(removedTexts)}.every(item => !text.includes(item)); })()`));
+    check(`Tema escuro so no gestor: ${role}`, (await evaluate(`!!document.querySelector('.theme-dash')`)) === (role === 'manager') && (role === 'manager' || await evaluate(`getComputedStyle(document.querySelector('.work-area')).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(document.querySelector('.card') || document.body).backgroundColor !== 'rgb(13, 33, 71)'`)));
+    check(`Menu lateral com logo branca ${role}`, await evaluate(`!![...document.querySelectorAll('.sidebar img')].find(img => img.src.includes('cti-logo-branca.png') && img.complete && img.naturalWidth > 0)`));
+    check(`Sino de alertas ${role}`, (await evaluate(`!!document.querySelector('[data-action="notifications"]')`)) === (role !== 'manager'));
+    if (role === 'manager') check('Gestor nao ve alertas nem contador', await evaluate(`!document.querySelector('[data-action="notifications"]') && !document.querySelector('#notification-count') && !document.body.innerText.includes('Resposta vencida')`));
+    if (role === 'client') {
+      check('Cliente sem Meus atendimentos e com Enviar feedback como inicio', !links.some(link => link.href === '#atendimentos' || link.text.includes('Meus atendimentos')) && links[0].href === '#enviar-feedback', links);
+    }
+    if (role === 'attendant') {
+      check('Atendente tem aba Clientes depois de Registrar atendimento', links.findIndex(link => link.href === '#clientes') === links.findIndex(link => link.href === '#registrar') + 1, links);
+      await evaluate(`location.hash='#relatorio'`);
+      await until(`document.body.innerText.includes('Prazos que precisam de atenção')`, 'prazos no relatorio do atendente');
+      check('Meu relatorio do atendente sem botoes, previa e equipes, com texto de periodo', await evaluate(`!document.querySelector('.report-type') && !document.body.innerText.includes('Prévia do relatório') && !document.body.innerText.includes('Comparação resumida') && document.body.innerText.includes('data de abertura')`));
+      const ownClients = [...new Set((await api('GET', '/api/bootstrap')).body.data.tickets.map(t => String(t.client_id)))];
+      check('Filtro de cliente lista so empresas dos atendimentos do atendente', await evaluate(`[...document.querySelectorAll('#client_id option')].map(o => o.value).filter(Boolean).every(v => ${JSON.stringify(ownClients)}.includes(v))`));
+      await shot('atendente-meu-relatorio');
     }
     if (role !== 'client') {
       const report = await api('GET', '/api/reports');
@@ -114,6 +143,43 @@ try {
       check(`CSV ${role}`, csv.status === 200 && csv.type.includes('text/csv') && typeof csv.body === 'string' && csv.body.length > 30);
     }
     if (role === 'attendant') {
+      await evaluate(`location.hash='#clientes'`);
+      await until(`!!document.querySelector('#client-search')`, 'aba Clientes');
+      const clientsApi = (await api('GET', '/api/bootstrap')).body.data.clients;
+      check('Aba Clientes e somente consulta: sem formulario nem campo de novo cliente', await evaluate(`!document.querySelector('#client-form') && !document.querySelector('#page-content form') && !document.querySelector('#name') && !/Cadastrar empresa/.test(document.body.textContent)`));
+      check('Aba Clientes orienta o cadastro com link /clientes/ em nova aba', await evaluate(`(() => { const a = document.querySelector('#page-content a[href="/clientes/"]'); return Boolean(a) && a.target === '_blank' && a.rel.includes('noopener'); })()`));
+      check('Aba Clientes lista as empresas com Cidade/UF', await evaluate(`(() => { const rows = [...document.querySelectorAll('#clients-list tbody tr')]; return rows.length === ${clientsApi.length} && rows.every(r => /\\/[A-Z]{2}/.test(r.cells[1].textContent)); })()`), clientsApi.length);
+      const probe = clientsApi[0].name.slice(0, 6);
+      await evaluate(`(() => { const i = document.querySelector('#client-search'); i.value = ${JSON.stringify(probe)}; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      check('Busca da aba Clientes filtra a lista', await evaluate(`(() => { const rows = [...document.querySelectorAll('#clients-list tbody tr')]; return rows.length >= 1 && rows.length <= ${clientsApi.length} && rows.every(r => r.textContent.toLowerCase().includes(${JSON.stringify(probe.toLowerCase())})); })()`));
+      await evaluate(`(() => { const i = document.querySelector('#client-search'); i.value = 'zzzz-inexistente'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      check('Busca sem resultado informa que nada foi encontrado', await evaluate(`document.querySelector('#clients-list').textContent.includes('Nenhuma empresa encontrada')`));
+      await evaluate(`(() => { const i = document.querySelector('#client-search'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      await shot('atendente-clientes');
+      await evaluate(`location.hash='#registrar'`);
+      await until(`!!document.querySelector('#status')`, 'formulario de registro com status');
+      check('Registro continua listando as empresas cadastradas', await evaluate(`[...document.querySelectorAll('#client_id option')].map(o => o.textContent).filter(Boolean).slice(1).join('|') === ${JSON.stringify(clientsApi.map(c => c.name).join('|'))}`));
+      check('Registro tem select Prioridade (Baixa, Media, Alta, Critica) e nenhum campo de data', await evaluate(`(() => { const s = document.querySelector('#priority'); const form = document.querySelector('#ticket-form'); return s?.tagName === 'SELECT' && [...s.options].map(o => o.textContent).join('|') === 'Baixa|Média|Alta|Crítica' && document.querySelector('label[for="priority"]').textContent === 'Prioridade' && !form.querySelector('input[type="date"], input[type="datetime-local"], #response_due_at'); })()`));
+      const hints = [];
+      for (const [value, prazo] of [['low', '8h'], ['medium', '4h'], ['high', '1h'], ['critical', '30min']]) {
+        await evaluate(`(() => { const s = document.querySelector('#priority'); s.value = ${JSON.stringify(value)}; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        hints.push(await evaluate(`document.querySelector('#priority-hint').textContent.includes(${JSON.stringify(prazo)})`));
+      }
+      check('Texto auxiliar da prioridade mostra o prazo (8h, 4h, 1h, 30min)', hints.every(Boolean), hints);
+      await evaluate(`(() => { const s = document.querySelector('#priority'); s.value = 'medium'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+      check('Registro oferece Status com Em atendimento e Resolvido, solucao oculta', await evaluate(`[...document.querySelectorAll('#status option')].map(o => o.textContent).join('|') === 'Em atendimento|Resolvido' && document.querySelector('#create-solution').hidden`));
+      await evaluate(`document.querySelector('#status').value='resolved';document.querySelector('#status').dispatchEvent(new Event('change',{bubbles:true}))`);
+      check('Escolher Resolvido mostra a solucao obrigatoria e o aviso', await evaluate(`!document.querySelector('#create-solution').hidden && document.querySelector('#solution').required && !document.querySelector('#solution').disabled && document.querySelector('#create-solution').textContent.includes('não poderá ser repetida')`));
+      const resolvedSubject = `Resolvido no registro QA ${Date.now()}`;
+      await evaluate(`document.querySelector('#subject').value=${JSON.stringify(resolvedSubject)};document.querySelector('#client_id').value='1';document.querySelector('#solution').value='Reinicio do servico e validacao feita junto ao cliente.';document.querySelector('#ticket-form').requestSubmit()`);
+      await until(`!!document.querySelector('.badge.awaiting_feedback')`, 'atendimento nasce aguardando confirmacao');
+      const created = (await api('GET', '/api/bootstrap')).body.data.tickets.find(t => t.subject === resolvedSubject);
+      check('Registro Resolvido nasce aguardando confirmacao e consome a unica mudanca', created?.status === 'awaiting_feedback' && created.manual_status_changes === 1 && created.solution.includes('Reinicio'), created && { status: created.status, manual: created.manual_status_changes });
+      check('Tela de atualizacao informa que a atualizacao ja foi utilizada', await evaluate(`document.querySelector('.status-quota')?.textContent.includes('já utilizada') && !document.querySelector('#solution-form')`));
+      await evaluate(`location.hash='#atendimentos'`);
+      await until(`!!document.querySelector('.status-link')`, 'status clicavel');
+      check('Lista do atendente tem status clicavel para atualizar', await evaluate(`document.querySelector('.status-link').textContent.includes('clique para atualizar') && document.querySelector('.status-link').getAttribute('href').startsWith('#registrar?id=')`));
+      check('Lista do atendente mostra selos de nivel e prioridade do atendimento criado', await evaluate(`(() => { const row = [...document.querySelectorAll('.data-table tbody tr')].find(r => r.textContent.includes(${JSON.stringify(resolvedSubject)})); return Boolean(row) && row.querySelector('.badge.level')?.textContent.trim() === 'N1' && row.querySelector('.badge.prio')?.textContent.trim() === 'Média'; })()`));
       await evaluate(`location.hash='#registrar'`);
       await until(`!!document.querySelector('#ticket-form')`);
       await evaluate(`document.querySelector('#subject').value='VPN';document.querySelector('#subject').dispatchEvent(new Event('input',{bubbles:true}))`);
@@ -128,34 +194,45 @@ try {
       const edited = await api('GET', '/api/bootstrap');
       check('Formulario edita atendimento no banco', edited.body.data.tickets.find(t => t.id === workflowTicket)?.subject === workflowSubject + ' revisado');
       await evaluate(`window.__qaForm=document.querySelector('#ticket-form');document.querySelector('#subject').value='Rascunho ainda nao salvo'`);
-      await api('PATCH', `/api/tickets/${workflowTicket}`, { response_due_at: new Date(Date.now() - 3600000).toISOString() });
-      await evaluate(`document.dispatchEvent(new Event('visibilitychange'))`);
+      await evaluate(`window.__qaFetch=window.fetch;window.fetch=async (...args)=>{const response=await window.__qaFetch(...args);if(args[0]==='/api/bootstrap'){const data=await response.json();data.data.notifications.push({title:'Resposta atrasada',message:'Lembrete de teste.',ticket_id:${workflowTicket},due_at:new Date(Date.now()-3600000).toISOString(),type:'response'});return new Response(JSON.stringify(data),{status:response.status,headers:response.headers});}return response;};document.dispatchEvent(new Event('visibilitychange'))`);
       await until(`document.querySelector('#toast').textContent.includes('Há novos lembretes')`, 'lembrete atualizado sem navegar');
+      await evaluate(`window.fetch=window.__qaFetch;delete window.__qaFetch`);
       check('Lembrete atualiza preservando digitacao e formulario', await evaluate(`document.querySelector('#ticket-form')===window.__qaForm && document.querySelector('#subject').value==='Rascunho ainda nao salvo'`));
       const alerts = (await api('GET', '/api/bootstrap')).body.data.notifications.length;
-      check('Contador de alertas acompanha banco sem recarregar', await evaluate(`Number(document.querySelector('#notification-count').textContent)===${alerts}`));
+      check('Contador de alertas acompanha o polling sem recarregar', await evaluate(`Number(document.querySelector('#notification-count').textContent)===${alerts + 1}`));
       await evaluate(`document.querySelector('#message').value='Estamos validando a conexao VPN. Retornaremos no prazo informado.';document.querySelector('#reply-form').requestSubmit()`);
       await until(`document.querySelector('#toast').textContent.includes('Resposta registrada')`);
       await evaluate(`document.querySelector('#solution').value='Credenciais VPN renovadas e rotas validadas com teste de conexao.';document.querySelector('#solution-form').requestSubmit()`);
       await until(`!document.querySelector('#solution-form') && document.querySelector('.badge.awaiting_feedback')`, 'solucao aguardando confirmacao');
       const solved = (await api('GET', '/api/bootstrap')).body.data.tickets.find(t => t.id === workflowTicket);
       check('UI envia solucao apenas uma vez sem encerrar', solved.status === 'awaiting_feedback' && solved.manual_status_changes === 1);
-      check('UI sem seletor de status', await evaluate(`!document.querySelector('select[name="status"]')`));
+      check('Atualizacao so oferece o envio da solucao, sem seletor de status', await evaluate(`!document.querySelector('select[name="status"]') && document.querySelector('.status-quota')?.textContent.includes('já utilizada')`));
       await shot('atendimento-criado');
       await evaluate(`location.hash='#pagina-inexistente'`);
       await until(`document.querySelector('h1')?.textContent.includes('Não encontramos esta página.')`, 'pagina 404');
       check('Pagina inexistente oferece retorno ao espaco do perfil', await evaluate(`!!document.querySelector('.standalone-error a[href="#atendimentos"]')`));
+      check('Pagina 404 usa a logo colorida sobre fundo claro', await evaluate(`!![...document.querySelectorAll('.standalone-error img')].find(img => img.src.includes('cti-oficial.png') && img.complete && img.naturalWidth > 0)`));
       await shot('pagina-404');
       await evaluate(`document.querySelector('.standalone-error a').click()`);
       await until(`!!document.querySelector('nav')`, 'retorno da pagina 404');
     }
     if (role === 'client') {
-      await evaluate(`location.hash='#enviar-feedback?ticket=${workflowTicket}'`);
-      await until(`!!document.querySelector('#feedback-text')`);
+      await evaluate(`location.hash='#enviar-feedback'`);
+      await until(`!!document.querySelector('.ticket-card[data-ticket="${workflowTicket}"] [data-action="decide"]')`, 'cartao do atendimento com botoes de decisao');
+      check('Cartao do cliente mostra protocolo, solucao e os dois botoes', await evaluate(`(() => { const card = document.querySelector('.ticket-card[data-ticket="${workflowTicket}"]'); const labels = [...card.querySelectorAll('[data-action="decide"]')].map(b => b.textContent.trim()); return card.textContent.includes('Solução enviada pela equipe') && card.textContent.includes('Credenciais VPN renovadas') && card.textContent.includes('Atendente:') && card.textContent.includes('Confirmação até') && labels.join('|') === 'Resolveu, pode encerrar|Ainda preciso de ajuda'; })()`));
+      check('Cliente nao tem formulario rapido nem select de resolucao antes da decisao', await evaluate(`!document.querySelector('form[data-form="quick-feedback"]') && !document.querySelector('select[name="resolved"]') && !document.querySelector('#feedback-form')`));
+      await shot('cliente-decisao');
+      await evaluate(`document.querySelector('[data-action="decide"][data-id="${workflowTicket}"][data-resolved="0"]').click()`);
+      await until(`!!document.querySelector('#feedback-text')`, 'formulario com a decisao fixada');
+      check('Decisao fixada em campo oculto, sem select', await evaluate(`document.querySelector('#feedback-form input[type="hidden"][name="resolved"]').value === '0' && !document.querySelector('#feedback-form select')`));
       await evaluate(`document.querySelector('#feedback-text').value='Ainda preciso de ajuda';document.querySelector('#feedback-text').dispatchEvent(new Event('input',{bubbles:true}))`);
       check('Texto bloqueia gravacao concorrente', await evaluate(`document.querySelector('[data-action="feedback-mode"][data-mode="audio"]').disabled`));
       await evaluate(`document.querySelector('[data-action="clear-feedback"]').click()`);
       check('Limpar libera troca de formato', await evaluate(`!document.querySelector('[data-action="feedback-mode"][data-mode="audio"]').disabled`));
+      await evaluate(`document.querySelector('[data-action="feedback-mode"][data-mode="audio"]').click()`);
+      check('Aba de audio vazia abre o painel de gravacao', await evaluate(`!!document.querySelector('#recording-panel') && !document.querySelector('#feedback-text')`));
+      await evaluate(`document.querySelector('[data-action="clear-feedback"]').click()`);
+      check('Descartar com audio vazio volta ao texto e libera o envio so com a nota', await evaluate(`!!document.querySelector('#feedback-text') && !document.querySelector('#recording-panel') && document.querySelector('[data-action="feedback-mode"][data-mode="text"]').getAttribute('aria-pressed') === 'true'`));
       await evaluate(`document.querySelector('[data-action="feedback-mode"][data-mode="audio"]').click();document.querySelector('#record-start').click()`);
       await until(`document.querySelector('#record-stop') && !document.querySelector('#record-stop').hidden`, 'microfone sintetico iniciado');
       await pause(1300);
@@ -165,21 +242,45 @@ try {
       await until(`document.querySelector('#audio-preview audio').readyState >= 1`, 'preview de audio decodificado');
       const wave = await evaluate(`({duration:document.querySelector('#audio-preview audio').duration,blob:document.querySelector('#audio-preview audio').src.startsWith('blob:')})`);
       check('Navegador reproduz WAV com microfone sintetico', wave.blob && wave.duration > 0 && wave.duration <= 60, wave);
-      await evaluate(`document.querySelector('[data-action="clear-feedback"]').click();location.hash='#atendimentos'`);
-      await until(`!!document.querySelector('[data-action="quick-feedback"][data-id="${workflowTicket}"]')`);
-      await evaluate(`document.querySelector('[data-action="quick-feedback"][data-id="${workflowTicket}"]').click()`);
-      await until(`!!document.querySelector('form[data-form="quick-feedback"]')`);
-      await evaluate(`document.querySelector('form[data-form="quick-feedback"] input[name="rating"][value="1"]').checked=true;document.querySelector('#resolved-${workflowTicket}').value='0';document.querySelector('form[data-form="quick-feedback"] [data-submit]').click()`);
-      await until(`document.querySelector('#toast').textContent.includes('ainda precisa de ajuda')`);
+      await evaluate(`document.querySelector('[data-action="clear-feedback"]').click()`);
+      await evaluate(`document.querySelector('#feedback-form input[name="rating"][value="1"]').checked=true;document.querySelector('#feedback-form input[name="confirmed"]').checked=true;document.querySelector('#feedback-form').requestSubmit()`);
+      await until(`document.querySelector('.success-card')?.textContent.includes('ainda precisa de ajuda')`, 'envio da decisao negativa');
       const rejected = (await api('GET', '/api/bootstrap')).body.data.tickets.find(t => t.id === workflowTicket);
-      check('Avaliacao rapida negativa mantem atendimento aberto', rejected.status === 'active' && rejected.manual_status_changes === 1);
+      check('Decisao negativa por botao mantem atendimento aberto', rejected.status === 'active' && rejected.manual_status_changes === 1);
+      check('Pos-envio do cliente nao aponta para Meus atendimentos', await evaluate(`!document.body.innerText.includes('Meus atendimentos')`));
       await shot('cliente-feedback-negativo');
     }
     if (role === 'supervisor') {
       const fresh = (await api('GET', '/api/bootstrap')).body.data;
+      const queueProtocol = fresh.tickets.find(t => t.id === workflowTicket)?.protocol;
+      await evaluate(`location.hash='#dashboard'`);
+      await until(`document.body.innerText.includes('Casos para tratar')`, 'fila de intervencao do supervisor');
+      check('Dashboard do supervisor sem prazos, sem conexoes entre equipes e sem resposta vencida', await evaluate(`!['Prazos que precisam de atenção', 'Conexões entre equipes', 'Resposta vencida'].some(item => document.body.innerText.includes(item))`));
+      check('Dashboard do supervisor abre com tres cartoes de intervencao antes da tabela e dos graficos', await evaluate(`(() => { const labels = [...document.querySelectorAll('.stat-label')].map(el => el.textContent.trim()); const table = document.querySelector('#report-results .data-table, #report-results .empty'); const chart = document.querySelector('#report-results .chart-card'); const cards = document.querySelector('.stats'); return labels.join('|') === 'Críticos sem revisão|Análises com falha|Cliente não resolveu' && Boolean(cards.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING) && Boolean(table.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING); })()`));
+      check('Fila mostra o atendimento que o cliente nao resolveu', await evaluate(`[...document.querySelectorAll('#report-results .data-table tbody tr')].some(row => row.textContent.includes(${JSON.stringify(queueProtocol)}) && row.textContent.includes('Não resolvido'))`), { protocol: queueProtocol, rows: await evaluate(`[...document.querySelectorAll('#report-results .data-table tbody tr')].map(row => row.textContent.replace(/\\s+/g, ' ').trim())`), rejected: fresh.tickets.filter(t => t.rejected_at).length });
+      const supervisorReport = (await api('GET', '/api/reports')).body.data;
+      check('Dashboard do supervisor sem concordancia IA x humano e com secoes secundarias em accordion', await evaluate(`!/concord/i.test(document.body.textContent) && document.querySelectorAll('#report-results details.acc').length >= 2`) && supervisorReport.agreement === undefined);
+      await shot('supervisor-fila');
+      await evaluate(`location.hash='#atendimentos'`);
+      await until(`!!document.querySelector('.data-table')`, 'atendimentos da equipe');
+      check('Atendimentos do supervisor sem lembretes de resposta', await evaluate(`!document.querySelector('.attention-list') && !document.body.innerText.includes('Resposta vencida') && !document.body.innerText.includes('Responder até')`));
+      const levelsApi = [...new Set(fresh.tickets.map(t => `N${t.support_level}`))].sort();
+      check('Atendimentos do supervisor mostram selos de nivel e de prioridade', await evaluate(`(() => { const lv = [...new Set([...document.querySelectorAll('.data-table .badge.level')].map(b => b.textContent.trim()))].sort(); return lv.length > 0 && JSON.stringify(lv) === '${JSON.stringify(levelsApi)}' && document.querySelectorAll('.data-table .badge.prio').length > 0; })()`), levelsApi);
+      check('Dados de demonstracao cobrem os selos N1, N2 e N3', levelsApi.join(',') === 'N1,N2,N3', levelsApi);
+      const levelBefore = fresh.tickets.find(t => t.id === workflowTicket).support_level;
+      await evaluate(`document.querySelector('[data-action="ticket-detail"][data-id="${workflowTicket}"]').click()`);
+      await until(`!!document.querySelector('#escalate-form')`, 'acao Escalar no detalhe');
+      check('Supervisor ve Escalar com niveis maiores que o atual e a localizacao do cliente', await evaluate(`(() => { const f = document.querySelector('#escalate-form'); const opts = [...f.querySelectorAll('option')].map(o => Number(o.value)); return opts.length > 0 && opts.every(v => v > ${levelBefore}) && f.querySelector('button').textContent.trim() === 'Escalar' && /\\/[A-Z]{2}/.test(document.querySelector('dialog .description-list').textContent); })()`));
+      await evaluate(`(() => { const f = document.querySelector('#escalate-form'); f.querySelector('select').value = '3'; f.requestSubmit(); })()`);
+      await until(`document.querySelector('#toast').textContent.includes('escalado')`, 'escalonamento concluido');
+      const escalated = (await api('GET', '/api/bootstrap')).body.data.tickets.find(t => t.id === workflowTicket);
+      check('Escalar eleva o nivel no banco e o detalhe mostra N3', escalated.support_level === 3 && await evaluate(`document.querySelector('dialog .badge.level')?.textContent.trim() === 'N3' && !document.querySelector('#escalate-form')`), escalated.support_level);
+      await shot('supervisor-escalado');
+      await evaluate(`document.querySelector('dialog [data-action="modal-close"]').click()`);
       const feedback = fresh.feedbacks.find(f => f.ticket_id === workflowTicket);
       await evaluate(`location.hash='#feedbacks'`);
       await until(`!!document.querySelector('[data-action="feedback-detail"][data-id="${feedback.id}"]')`);
+      check('Feedbacks da equipe explica a origem dos dados', await evaluate(`document.querySelector('#page-content .banner')?.textContent.includes('sentimento vem do modelo local ou da revisão humana')`));
       await evaluate(`document.querySelector('[data-action="feedback-detail"][data-id="${feedback.id}"]').click()`);
       await until(`!!document.querySelector('#review-form') && !!document.querySelector('#modal-cases .case-card')`, 'revisao com cases de resolucao');
       check('Modal supervisor oferece case real de solucao', await evaluate(`document.querySelector('#modal-cases').textContent.includes('VPN')`));
@@ -199,6 +300,58 @@ try {
       check('Nova tentativa supervisor preserva limite manual', retry.status === 'awaiting_feedback' && retry.manual_status_changes === 1 && retry.solution_attempt === 2);
     }
     if (role === 'manager') {
+      await evaluate(`location.hash='#visao-geral'`);
+      await until(`!!document.querySelector('.donut-svg') && !!document.querySelector('.hero')`, 'visao geral do gestor');
+      const managerReport = (await api('GET', '/api/reports')).body.data;
+      const answered = managerReport.deadline ? managerReport.deadline.on_time + managerReport.deadline.late : 0;
+      const overview = await evaluate(`({heroes: [...document.querySelectorAll('.hero')].map(h => ({bg: getComputedStyle(h).backgroundImage, value: h.querySelector('.hero-value').textContent.trim(), sub: h.querySelector('.hero-sub').textContent.trim(), area: !!h.querySelector('.hero-chart svg path.hero-fill')})), strip: [...document.querySelectorAll('.kpi-strip .strip-label')].map(e => e.textContent.trim()), cards: document.querySelectorAll('.stats .stat, .kpi').length, deadline: !!document.querySelector('.donut-svg[aria-label^="Cumprimento do prazo"]'), deadlineLegend: [...document.querySelectorAll('.donut-legend span')].map(e => e.textContent.trim()), deadlineValues: [...document.querySelectorAll('.donut-legend strong')].map(e => Number(e.textContent.trim().split(' ')[0])), databars: document.querySelectorAll('.databar-table .databar-fill.blue').length, negBars: document.querySelectorAll('.databar-table .databar-fill.pink').length, pct: document.querySelectorAll('.databar-table .pct-cell').length, stack: !!document.querySelector('.sbars'), gauge: !!document.querySelector('.gauge-svg'), heat: !!document.querySelector('.heatmap'), received: [...document.querySelectorAll('.databar-table tbody tr td:nth-child(2) b')].map(b => Number(b.textContent)), heatCells: [...document.querySelectorAll('.heat-box')].map(b => Number(b.textContent)), comparison: document.body.textContent.includes('Comparação com o período anterior'), agreement: /concord/i.test(document.body.textContent), accordions: document.querySelectorAll('details.acc').length})`);
+      await shot('gestor-visao-geral');
+      const dashTone = `(() => { const dash = document.querySelector('.theme-dash'); if (!dash) return null; const bg = getComputedStyle(dash).backgroundColor.match(/\\d+/g).map(Number); const fg = getComputedStyle(document.querySelector('h1')).color.match(/\\d+/g).map(Number); return { bgSum: bg[0] + bg[1] + bg[2], fgSum: fg[0] + fg[1] + fg[2], outside: !document.querySelector('.sidebar').closest('.theme-dash'), pressed: document.querySelector('[data-action="theme"]').getAttribute('aria-pressed'), label: document.querySelector('[data-action="theme"]').textContent.trim() }; })()`;
+      const lightTone = await evaluate(dashTone);
+      check('Gestor: tema claro e o padrao (fundo claro, texto escuro, botao oferece Tema escuro)', lightTone && lightTone.bgSum > 600 && lightTone.fgSum < 300 && lightTone.outside && lightTone.pressed === 'false' && lightTone.label === 'Tema escuro', lightTone);
+      await shot('gestor-visao-geral-claro');
+      await evaluate(`document.querySelector('[data-action="theme"]').click()`);
+      const darkTone = await evaluate(dashTone);
+      check('Gestor: botao liga o tema escuro (fundo azul-marinho, texto claro, so no contêiner do gestor) e guarda a escolha', darkTone && darkTone.bgSum < 150 && darkTone.fgSum > 600 && darkTone.outside && darkTone.pressed === 'true' && darkTone.label === 'Tema claro' && await evaluate(`localStorage.getItem('cti-tema') === 'escuro'`), darkTone);
+      await shot('gestor-visao-geral');
+      check('Gestor: 3 cartoes grandes em degrade (azul, verde, rosa) com area suave e valores da API', overview.heroes.length === 3 && overview.heroes.every(h => h.bg.includes('gradient') && h.area) && overview.heroes.map(h => h.value).join('|') === [managerReport.received, managerReport.sentiments.positive, managerReport.sentiments.negative].join('|') && overview.cards === 0, overview.heroes);
+      check('Gestor: cartoes tem subtitulo verdadeiro (Melhor semana/dia, Pior semana/dia ou texto de ausencia)', overview.heroes.every(h => /^(Melhor|Pior) (dia|semana): .+ \(\d+ .+\)$|^Nenhum .+ no período$|^Série diária indisponível$/.test(h.sub)), overview.heroes.map(h => h.sub));
+      check('Gestor: faixa de KPIs restantes (criticos, atrasados) fora de cartoes', overview.strip.join('|') === 'Casos críticos|Atrasados|Resolvidos|Aguardando cliente', overview.strip);
+      check('Gestor: Visao geral nao traz comparacao nem accordions', !overview.comparison && overview.accordions === 0, overview);
+      check('Gestor: Visao geral usa 6 tipos de grafico (area, rosca, data bars, empilhadas, gauge, mapa de calor)', overview.deadline && overview.databars > 0 && overview.negBars > 0 && overview.pct > 0 && overview.stack && overview.heat && (answered === 0 || overview.gauge), overview);
+      check('Gestor: gauge de respondidos no prazo reflete a API', answered === 0 || await evaluate(`document.querySelector('.gauge-svg').getAttribute('aria-label').startsWith('${Math.round(managerReport.deadline.on_time / answered * 100)}% respondidos no prazo')`));
+      check('Gestor: data bars por canal somam os feedbacks recebidos', overview.received.reduce((a, b) => a + b, 0) === managerReport.received, { tela: overview.received, api: managerReport.received });
+      check('Gestor: mapa de calor por nivel reflete by_support_level da API', [1, 2, 3].every((level, i) => overview.heatCells.slice(i * 4, i * 4 + 4).reduce((a, b) => a + b, 0) === (managerReport.by_support_level[level] ?? 0)), { celulas: overview.heatCells, api: managerReport.by_support_level });
+      check('Gestor: detalhamento do prazo esta na rosca (4 faixas)', overview.deadlineLegend.join('|') === 'No prazo|Fora do prazo|Aguardando no prazo|Vencido', overview);
+      check('Gestor: rosca do prazo reflete a API', Boolean(managerReport.deadline) && overview.deadlineValues.join('|') === [managerReport.deadline.on_time, managerReport.deadline.late, managerReport.deadline.awaiting_on_time, managerReport.deadline.overdue].join('|'), { api: managerReport.deadline ?? 'campo deadline ausente', tela: overview.deadlineValues });
+      check('Gestor: filtros em faixa superior com selects compactos e exportacao', await evaluate(`!!document.querySelector('.dash-band #filters-form #team_id') && !!document.querySelector('.dash-band a[download]') && document.querySelector('#team_id').getBoundingClientRect().height <= 44`));
+      await evaluate(`location.hash='#indicadores'`);
+      await until(`!!document.querySelector('.stackbar') && (${managerReport.trend.length < 2} || !!document.querySelector('.evo-svg'))`, 'indicadores do gestor');
+      const indicators = await evaluate(`({stats: document.querySelectorAll('.stats .stat').length, area: !!document.querySelector('.evo-svg'), stack: !!document.querySelector('.stackbar'), teams: !!document.querySelector('.data-table'), topics: document.body.textContent.includes('Assuntos que mais aparecem'), bars: document.querySelectorAll('.vs-bars').length, agreement: /concord/i.test(document.body.textContent)})`);
+      check('Gestor: Indicadores tem comparacao com o periodo anterior antes dos graficos', await evaluate(`(() => { const heading = [...document.querySelectorAll('h2')].find(h => h.textContent === 'Comparação com o período anterior'); const chart = document.querySelector('.chart-card'); return Boolean(heading) && Boolean(heading.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING); })()`));
+      check('Gestor: Visao geral nao traz comparacao', !overview.comparison, overview);
+      check('Comparacao do gestor reflete a API e mostra as duas janelas (depende do backend)', await evaluate(`(() => { const c = ${JSON.stringify(managerReport.comparison ?? null)}; if (!c) return false; const cards = [...document.querySelectorAll('.comparison-stat')]; const short = v => v.slice(8, 10) + '/' + v.slice(5, 7); const windows = document.querySelector('.comparison-windows')?.textContent ?? ''; return cards.length === 3 && ['Feedbacks recebidos', 'Percentual de negativos', 'Casos críticos'].every((label, i) => cards[i].querySelector('.stat-label').textContent === label) && cards[0].textContent.includes('Antes: ' + c.previous.received) && cards[1].textContent.includes('Antes: ' + c.previous.negative_percent + '%') && cards[2].textContent.includes('Antes: ' + c.previous.critical) && windows.includes('De ' + short(c.current.from) + ' a ' + short(c.current.to) + ' contra ' + short(c.previous.from) + ' a ' + short(c.previous.to)); })()`), managerReport.comparison ?? 'campo comparison ausente');
+      check('Comparacao do gestor com separacao visivel entre Antes e a variacao', await evaluate(`(() => { const text = [...document.querySelectorAll('.comparison-stat')].map(c => c.textContent).join('|'); return text.length > 0 && !text.includes('0sem') && !text.includes('%sem'); })()`));
+      check('Comparacao do gestor: nem todos os cartoes dizem sem base de comparacao (depende do backend)', await evaluate(`(() => { const cards = [...document.querySelectorAll('.comparison-stat')]; return cards.length === 3 && cards.some(c => !c.textContent.includes('sem base de comparação')); })()`));
+      check('Comparacao do gestor tem setas de variacao e mini barras atual x anterior', await evaluate(`(() => { const cards = [...document.querySelectorAll('.comparison-stat')]; return cards.length === 3 && cards.every(c => c.querySelector('.vs-now') && c.querySelector('.vs-prev')) && cards.some(c => /[↑↓→]/.test(c.querySelector('.delta')?.textContent ?? '')); })()`));
+      check('Gestor: Indicadores tem comparacao, grafico de evolucao em area, distribuicao e assuntos visiveis', indicators.stats === 3 && indicators.stack && indicators.topics && (managerReport.trend.length < 2 || indicators.area) && !indicators.teams, indicators);
+      if (managerReport.trend.length >= 2) {
+        const evo = await evaluate(`(() => { const svg = document.querySelector('svg.evo-svg'); const wrap = svg.closest('.evo-wrap'); return { role: svg.getAttribute('role'), label: svg.getAttribute('aria-label'), points: svg.querySelectorAll('.evo-dot').length, negPoints: svg.querySelectorAll('.evo-dot-neg').length, line: !!svg.querySelector('path.evo-line-total'), area: !!svg.querySelector('path.evo-area'), peak: !!svg.querySelector('.evo-flag-text'), gradient: !!svg.querySelector('linearGradient'), ticks: [...svg.querySelectorAll('.evo-tick')].length, viewBox: svg.getAttribute('viewBox'), legend: wrap.closest('.evo-panel').querySelector('.legend').textContent, details: !!wrap.closest('.evo-panel').querySelector('details.evo-data table tbody tr') }; })()`);
+        check('Evolucao: svg role=img com aria-label resumido, mais de 1 ponto, area, linha, pico, legenda e tabela de dados', evo.role === 'img' && evo.label.length > 40 && evo.points > 1 && evo.negPoints > 1 && evo.line && evo.area && evo.peak && evo.gradient && evo.legend.includes('Negativos') && evo.details, evo);
+        check('Evolucao: rotulos do eixo X nao se sobrepoem', await evaluate(`(() => { const boxes = [...document.querySelectorAll('.evo-svg text.evo-tick')].map(t => t.getBoundingClientRect()).filter(b => b.top > document.querySelector('.evo-svg').getBoundingClientRect().bottom - 40); boxes.sort((a, b) => a.left - b.left); return boxes.length >= 2 && boxes.every((b, i) => i === 0 || b.left >= boxes[i - 1].right + 2); })()`));
+        await evaluate(`(() => { const svg = document.querySelector('svg.evo-svg'); const r = svg.getBoundingClientRect(); svg.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: r.left + r.width * 0.5, clientY: r.top + r.height * 0.5 })); })()`);
+        check('Evolucao: tooltip aparece no hover com valor e data', await evaluate(`(() => { const tip = document.querySelector('.evo-tip'); return !tip.hidden && /Feedbacks: \\d+/.test(tip.textContent) && /Negativos: \\d+/.test(tip.textContent) && /\\d{2}\\/\\d{2}/.test(tip.textContent) && document.querySelector('.evo-hover.on') !== null; })()`));
+        await evaluate(`document.querySelector('[data-action="evo-mode"][aria-pressed="false"]').click()`);
+        check('Evolucao: alternar Dia/Semana redesenha o grafico e mantem o role=img', await evaluate(`(() => { const svg = document.querySelector('svg.evo-svg'); return svg.getAttribute('role') === 'img' && !!svg.querySelector('path.evo-line-total') && svg.querySelectorAll('.evo-tick').length > 3 && document.querySelectorAll('[data-action="evo-mode"][aria-pressed="true"]').length === 1; })()`));
+        const pageWidth = await evaluate('({w: document.documentElement.scrollWidth, v: innerWidth})');
+        check('Evolucao: nao estoura a largura da pagina em 1440', pageWidth.w <= pageWidth.v, pageWidth);
+      } else check('Evolucao: com menos de 2 dias mostra estado vazio claro', await evaluate(`document.querySelector('.evo-panel').textContent.includes('Ainda não há série suficiente')`));
+      await shot('gestor-indicadores');
+      check('Gestor: sem concordancia IA x humano na UI nem na API', !overview.agreement && !indicators.agreement && managerReport.agreement === undefined, { overview: overview.agreement, indicators: indicators.agreement, api: managerReport.agreement });
+      await evaluate(`location.hash='#equipes'`);
+      await until(`!!document.querySelector('.databar-table')`, 'equipes do gestor');
+      check('Gestor: Comparacao entre equipes herda o tema escuro e tem data bars com ate 4 colunas', await evaluate(`!!document.querySelector('.theme-dash .databar-table') && ${visibleCols}.every(n => n <= 4) && document.querySelectorAll('.databar-table .databar-fill').length >= 3`));
+      await shot('gestor-equipes');
       await evaluate(`location.hash='#relatorios'`);
       await until(`!!document.querySelector('#team_id')`);
       await evaluate(`document.querySelector('#team_id').value='2';document.querySelector('#filters-form').requestSubmit()`);
@@ -209,13 +362,44 @@ try {
       await evaluate(`document.querySelector('[data-action="report-type"][data-type="criticality"]').click()`);
       await until(`document.body.textContent.includes('Relatório de criticidade') || document.querySelector('[data-action="report-type"][data-type="criticality"]')?.classList.contains('selected')`);
       check('Gestor acessa relatorio de criticidade', await evaluate(`!!document.querySelector('[data-action="report-type"][data-type="criticality"]')`));
+      check('Gestor: Relatorios herda o tema escuro e mantem tabelas com ate 4 colunas e sem rolagem horizontal', await evaluate(`!!document.querySelector('.theme-dash') && ${visibleCols}.every(n => n <= 4) && document.documentElement.scrollWidth <= innerWidth`));
       await shot('gestor-filtro-criticidade');
+    }
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+    await pause(200);
+    for (const [index, link] of links.entries()) {
+      await evaluate(`location.hash=${JSON.stringify(link.href)}`);
+      await pause(600);
+      const wide = await evaluate('({width:document.documentElement.scrollWidth,viewport:innerWidth,title:document.querySelector("h1")?.textContent})');
+      check(`Desktop 1280 sem rolagem horizontal ${role}: ${link.text}`, Boolean(wide.title) && wide.width <= wide.viewport, wide);
+      check(`Desktop 1280 tabelas com no maximo 4 colunas visiveis ${role}: ${link.text}`, (await evaluate(visibleCols)).every(n => n <= 4));
+      await shot(`${role}-d${index}`, 1280);
     }
     await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await pause(200);
     const width = await evaluate('({width:document.documentElement.scrollWidth,viewport:innerWidth})');
     check(`Layout mobile ${role}`, width.width <= width.viewport, width);
     await shot(`${role}-mobile`, 390);
+    await evaluate('location.reload()');
+    await pause(800);
+    await until('!!document.querySelector("nav")', `recarga mobile ${role}`);
+    for (const [index, link] of links.entries()) {
+      await evaluate(`location.hash=${JSON.stringify(link.href)}`);
+      await pause(500);
+      await evaluate(`(() => { const toast = document.querySelector('#toast'); if (toast) toast.style.display = 'none'; })()`);
+      const mobile = await evaluate('({width:document.documentElement.scrollWidth,viewport:innerWidth,title:document.querySelector("h1")?.textContent})');
+      check(`Mobile 390 sem rolagem horizontal ${role}: ${link.text}`, Boolean(mobile.title) && mobile.width <= mobile.viewport, mobile);
+      check(`Mobile 390 tabelas com no maximo 4 colunas visiveis ${role}: ${link.text}`, (await evaluate(visibleCols)).every(n => n <= 4));
+      await shot(`${role}-m${index}`, 390);
+      if ((role === 'supervisor' && link.href === '#dashboard') || (role === 'attendant' && link.href === '#relatorio')) {
+        const label = role === 'supervisor' ? 'Casos para tratar' : 'Prazos que precisam de atencao';
+        const heading = role === 'supervisor' ? 'Casos para tratar' : 'Prazos que precisam de atenção';
+        await until(`document.body.innerText.includes(${JSON.stringify(heading)})`, `secao ${label} no mobile`);
+        const action = await evaluate(`(() => { const h = [...document.querySelectorAll('h2')].find(el => el.textContent === ${JSON.stringify(heading)}); const table = h?.closest('.section-head')?.nextElementSibling?.querySelector('table.table-priority'); const target = table?.querySelector('tbody .text-link'); if (!target) return null; const box = target.getBoundingClientRect(); return {right: Math.round(box.right), left: Math.round(box.left), viewport: innerWidth, wrapScroll: table.parentElement.scrollWidth > table.parentElement.clientWidth}; })()`);
+        check(`Mobile 390: botao de acao de ${label} (${role}) dentro da largura visivel`, Boolean(action) && action.right <= action.viewport && action.left >= 0, action);
+        await shot(`${role}-m-${role === 'supervisor' ? 'dashboard' : 'relatorio'}-acao`, 390);
+      }
+    }
     await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   }
   await api('POST', '/api/logout');

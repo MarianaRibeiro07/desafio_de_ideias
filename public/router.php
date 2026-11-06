@@ -13,4 +13,5 @@ if($file&&str_starts_with($file,__DIR__.DIRECTORY_SEPARATOR)&&is_file($file)&&!s
 if($path!=='/'&&pathinfo($path,PATHINFO_EXTENSION)!==''){http_response_code(404);exit;}
 header('X-Content-Type-Options: nosniff');header('X-Frame-Options: DENY');header('Referrer-Policy: same-origin');
 header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
-header('Content-Type: text/html; charset=utf-8');readfile(__DIR__.'/index.html');return true;
+header('Content-Type: text/html; charset=utf-8');
+readfile(__DIR__.(rtrim($path,'/')==='/clientes'?'/clientes/index.html':'/index.html'));return true;

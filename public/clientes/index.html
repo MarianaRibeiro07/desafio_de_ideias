@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CTI Escuta, Cadastro de clientes</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/clientes/clientes.css">
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-conteudo">
+      <div class="marca">
+        <img src="/assets/cti-logo-branca.png" width="131" height="109" alt="CTI, conectando empresas e pessoas">
+        <span class="marca-nome">escuta</span>
+      </div>
+      <div class="topo-acoes">
+        <a class="link-topo" href="/">Voltar ao sistema geral</a>
+        <button type="button" id="sair" class="botao botao-contorno" hidden>Sair</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="principal" class="pagina">
+    <p id="carregando" class="vazio" role="status">Carregando...</p>
+
+    <section id="login-view" class="cartao cartao-estreito" aria-labelledby="login-titulo" hidden>
+      <h1 id="login-titulo">Cadastro de clientes</h1>
+      <p class="apoio">Entre com sua conta de atendente ou supervisor.</p>
+      <form id="login-form" novalidate>
+        <div class="campo">
+          <label for="login-email">E-mail</label>
+          <input id="login-email" name="email" type="email" autocomplete="username" required>
+        </div>
+        <div class="campo">
+          <label for="login-password">Senha</label>
+          <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="botao">Entrar</button>
+      </form>
+    </section>
+
+    <section id="acesso-negado" class="cartao cartao-estreito" aria-labelledby="negado-titulo" hidden>
+      <h1 id="negado-titulo">Acesso negado</h1>
+      <p class="apoio">Esta tela de cadastro é exclusiva de atendentes e supervisores. Seu perfil não tem permissão para cadastrar clientes.</p>
+      <a class="botao" href="/">Voltar ao sistema geral</a>
+    </section>
+
+    <div id="app-view" hidden>
+      <h1 class="titulo-pagina">Cadastro de clientes</h1>
+
+      <section class="cartao" aria-labelledby="cadastro-titulo">
+        <h2 id="cadastro-titulo">Novo cliente</h2>
+        <form id="cadastro-form" novalidate>
+          <div class="grade">
+            <div class="campo campo-nome">
+              <label for="cliente-nome">Nome da empresa</label>
+              <input id="cliente-nome" name="name" type="text" minlength="3" maxlength="120" autocomplete="organization" required>
+            </div>
+            <div class="campo">
+              <label for="cliente-cidade">Cidade</label>
+              <input id="cliente-cidade" name="city" type="text" maxlength="80" autocomplete="address-level2" required>
+            </div>
+            <div class="campo campo-uf">
+              <label for="cliente-uf">UF</label>
+              <select id="cliente-uf" name="state" required></select>
+            </div>
+          </div>
+          <div class="acoes">
+            <button type="submit" id="cadastrar" class="botao">Cadastrar cliente</button>
+          </div>
+        </form>
+        <p id="mensagem" class="mensagem" aria-live="polite" aria-atomic="true"></p>
+      </section>
+
+      <section class="cartao" aria-labelledby="lista-titulo">
+        <div class="lista-cabecalho">
+          <h2 id="lista-titulo">Clientes cadastrados</h2>
+          <p id="contagem" class="apoio" aria-live="polite"></p>
+        </div>
+        <div class="campo campo-busca">
+          <label for="busca">Buscar por nome ou cidade</label>
+          <input id="busca" type="search" autocomplete="off">
+        </div>
+        <ul id="lista" class="lista"></ul>
+        <p id="lista-vazia" class="vazio" hidden></p>
+      </section>
+    </div>
+  </main>
+
+  <script src="/clientes/clientes.js"></script>
+</body>
+</html>

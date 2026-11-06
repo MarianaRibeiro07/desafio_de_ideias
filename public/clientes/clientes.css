@@ -1,0 +1,70 @@
+@font-face{font-family:Inter;src:url('/assets/inter-400.ttf') format('truetype');font-weight:400;font-display:swap}
+@font-face{font-family:Inter;src:url('/assets/inter-500.ttf') format('truetype');font-weight:500;font-display:swap}
+@font-face{font-family:Inter;src:url('/assets/inter-600.ttf') format('truetype');font-weight:600;font-display:swap}
+@font-face{font-family:Inter;src:url('/assets/inter-700.ttf') format('truetype');font-weight:700;font-display:swap}
+:root{font-family:Inter,Arial,sans-serif;color:#142133;background:#e2eaf7;font-synthesis:none;font-size:14px;--blue:#00499c;--muted:#637388;--border:#e2e8f0;--red:#b42318;--green:#2f7a52}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;min-height:100vh;overflow-wrap:anywhere}
+button,input,select{font:inherit}
+a{color:var(--blue);text-decoration:none}
+:focus-visible{outline:3px solid #6aa3ee;outline-offset:2px}
+
+.topo{background:linear-gradient(135deg,#00356f,#00499c);color:#fff}
+.topo-conteudo{max-width:960px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.marca{display:flex;flex-direction:column;align-items:flex-start}
+.marca img{height:52px;width:auto}
+.marca-nome{font-size:13px;font-weight:600;margin-top:4px}
+.topo-acoes{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.link-topo{color:#fff;font-weight:600;padding:8px 2px;border-bottom:1px solid rgba(255,255,255,.5)}
+
+.pagina{max-width:960px;margin:0 auto;padding:28px 24px 48px}
+.titulo-pagina{font-size:26px;letter-spacing:-.5px;margin:0 0 18px;color:#0f2a52}
+.cartao{background:#fff;border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:20px;box-shadow:0 1px 3px rgba(20,33,51,.06)}
+.cartao-estreito{max-width:440px;margin:24px auto}
+.cartao h1{font-size:22px;margin:0 0 6px}
+.cartao h2{font-size:17px;margin:0 0 16px}
+.apoio{color:var(--muted);margin:0 0 16px;line-height:1.5}
+
+.grade{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1.3fr) 110px;gap:16px}
+.campo{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.grade .campo{margin-bottom:0}
+label{font-size:12px;font-weight:600;color:#2b3b52}
+input,select{width:100%;min-height:44px;padding:10px 12px;border:1px solid #c5d0e0;border-radius:10px;background:#fff;color:inherit}
+input:focus,select:focus{border-color:var(--blue)}
+.acoes{margin-top:18px}
+
+.botao{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 20px;border:0;border-radius:10px;background:var(--blue);color:#fff;font-weight:600;cursor:pointer}
+.botao:hover{background:#003a7d}
+.botao:disabled{opacity:.55;cursor:not-allowed}
+.botao-contorno{background:transparent;border:1px solid rgba(255,255,255,.6)}
+.botao-contorno:hover{background:rgba(255,255,255,.14)}
+
+.mensagem{margin:14px 0 0;padding:0;line-height:1.5;font-weight:500}
+.mensagem.ok,.mensagem.erro{padding:10px 12px;border-radius:10px}
+.mensagem.ok{background:#e9f6ee;color:var(--green)}
+.mensagem.erro{background:#fdeceb;color:var(--red)}
+#login-form .mensagem{margin:0 0 14px}
+
+.lista-cabecalho{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.lista-cabecalho .apoio{margin:0 0 16px;font-size:12px}
+.campo-busca{max-width:420px}
+.lista{list-style:none;margin:6px 0 0;padding:0}
+.item{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1.3fr);gap:16px;padding:14px 4px;border-top:1px solid var(--border);align-items:start}
+.rotulo{display:none;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+.col-nome .valor{font-weight:600}
+.vazio{color:var(--muted);text-align:center;padding:20px 0}
+
+@media(max-width:760px){
+  .topo-conteudo{padding:12px 16px}
+  .pagina{padding:20px 16px 40px}
+  .cartao{padding:18px}
+  .grade{grid-template-columns:minmax(0,1fr)}
+  .item{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 12px}
+  .col-nome{grid-column:1/-1}
+  .rotulo{display:block}
+  .col-nome .rotulo{display:none}
+  .botao{width:100%}
+  .topo-acoes .botao{width:auto}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
