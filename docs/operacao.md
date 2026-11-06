@@ -40,11 +40,17 @@ Os testes de integração definem a senha `CtiDemo2026!` para as contas abaixo. 
 | Gestor | `helena@cti.demo` |
 | Cliente | `lucas@cti.demo` |
 
+A base de demonstração é determinística e sintética, carregada somente em banco vazio, com datas relativas à primeira inicialização. Ela tem 9 usuários, 42 atendimentos e 31 feedbacks (32 atendimentos e 21 feedbacks nos últimos 30 dias, e 10 atendimentos resolvidos com feedback entre 31 e 54 dias atrás, para a comparação com o período anterior aparecer em `GET /api/reports` sem filtros), em duas equipes, quatro atendentes, seis clientes e quatro canais. Inclui feedbacks positivos, neutros e negativos (notas 1 e 2 com as frases de criticidade da entrevista), seis críticos sem revisão e três já revisados (um recente e dois do período anterior, um em cada equipe), três atendimentos ativos em que o cliente informou que não resolveu, duas análises com falha, e para o atendente `rafael@cti.demo` uma resposta vencida e outra prevista para as próximas 24 horas. As análises concluídas se identificam com o modelo `demonstracao-sintetica`; nada disso vem de dados da empresa, que não forneceu exemplos anonimizados.
+
 Cada login deve ser feito em sua própria sessão de navegador. Para comparar perfis simultaneamente, use navegadores diferentes ou uma janela anônima; abas do mesmo navegador compartilham sessão.
 
 ## Processo de atendimento
 
 O atendente registra o caso e usa o mesmo formulário para atualizar seus dados. Ao preencher o assunto, pode consultar correspondências e casos de solução já existentes no banco. Essa busca é textual: não é pesquisa semântica nem geração de resposta por inteligência artificial.
+
+Se o cliente (empresa) ainda não existe na lista, o atendente o cadastra antes, informando apenas o nome (3 a 120 caracteres). Nomes repetidos, sem diferenciar maiúsculas e minúsculas, são recusados com mensagem de duplicidade; a checagem roda em transação e há um índice único no banco (`clients_name_nocase`). Se uma base antiga já tiver duplicatas, a inicialização não cai: o índice deixa de ser criado e uma linha no log de erros do PHP avisa, até que os cadastros repetidos sejam resolvidos e `php bin/console.php init` rode de novo. O cliente cadastrado fica disponível para atendente, supervisor e gestor.
+
+Ao registrar, o atendente escolhe o status inicial. "Ativo" é o padrão. "Resolvido" exige a solução (10 a 2.000 caracteres) e significa solução enviada e aguardando confirmação do cliente: o atendimento não é encerrado, o prazo de 72 horas conta do registro e a única mudança manual do atendente é consumida, então não há segundo envio de solução.
 
 O envio da solução é a única ação manual do atendente que muda a etapa do atendimento. A partir desse envio, começa o prazo de 72 horas para o cliente confirmar se o problema foi resolvido. A confirmação encerra como resolvido. Se o cliente declarar que o problema continua, o caso permanece ativo e não pode encerrar por ausência de resposta àquela tentativa.
 
@@ -54,13 +60,13 @@ O cliente responde dentro de sua área autenticada, sem depender de link recebid
 
 ## Supervisão e relatórios
 
-O supervisor acompanha sua equipe e revisa feedbacks no modal, consultando casos de resolução relacionados antes de registrar ação e justificativa. Sugestões automáticas não substituem essa revisão.
+O supervisor resolve as pendências da equipe: revisa feedbacks críticos no modal, consultando casos de resolução relacionados antes de registrar ação e justificativa, tenta de novo análises com falha e envia nova tentativa justificada quando o cliente informa que não resolveu. Sugestões automáticas não substituem essa revisão.
 
-O atendente recebe indicadores dos próprios atendimentos. O gestor acompanha indicadores gerais e comparações entre equipes, com filtros de relatório. Os filtros não concedem acesso a registros fora do escopo do perfil.
+O atendente recebe indicadores dos próprios atendimentos. O gestor avalia os resultados da organização: indicadores gerais, histórico, comparações entre equipes, filtros de relatório e exportação, sem operar pendências e sem alertas. Os filtros não concedem acesso a registros fora do escopo do perfil.
 
 O botão "Exportar atendimentos filtrados" gera CSV com protocolo, assunto, equipe, canal, status, data e motivo do encerramento. Esses campos também são informados na interface. O arquivo contém atendimentos individuais no escopo e filtros escolhidos, inclusive para o gestor; os indicadores agregados permanecem no painel.
 
-Os lembretes de data de resposta aparecem no sistema. Não há confirmação de envio por e-mail, WhatsApp ou telefonia: esses serviços não foram fornecidos e não devem ser presumidos pela interface.
+Os lembretes aparecem no sistema e dependem do perfil. O atendente vê resposta atrasada ou prevista nas próximas 24 horas e clientes que informaram não ter resolvido. O supervisor vê feedbacks críticos sem revisão e clientes que informaram não ter resolvido, e não recebe lembrete de resposta. O gestor não recebe alertas. O cliente vê os pedidos de confirmação. No relatório, a lista de respostas vencidas só é preenchida para o atendente. Não há confirmação de envio por e-mail, WhatsApp ou telefonia: esses serviços não foram fornecidos e não devem ser presumidos pela interface.
 
 Enquanto o portal está aberto, a interface consulta atualizações a cada 60 segundos e ao retomar a aba. O contador e o aviso de lembrete atualizam sem reconstruir o formulário nem apagar o rascunho. Se a sessão expirar, a interface apresenta o login e permite autenticar novamente sem recarregar a página.
 
@@ -78,7 +84,54 @@ Se a implantação não mantiver o worker ativo, configure esse comando no agend
 
 O argumento opcional `--now` recebe uma data ISO 8601 para simular tempo em testes. Não use datas futuras sobre o banco que deseja preservar, porque o descarte de conteúdo não pode ser desfeito pela aplicação.
 
+### Exclusão sob demanda
+
+Para remover o conteúdo de um feedback antes do prazo (pedido de exclusão do titular, por exemplo):
+
+```powershell
+php bin/console.php redact --feedback=ID
+```
+
+O comando faz o mesmo descarte da retenção (texto, transcrição, resumo, temas, evidências, arquivo de áudio e texto das revisões), preserva os dados estruturados dos indicadores e registra o evento `content_redacted` na auditoria. A saída é JSON, por exemplo `{"feedback_id":12,"protocol":"FDB-2026-0012","status":"redacted","redacted_at":"2026-11-06T18:00:00+00:00","audio_removed":true}`. Rodar de novo devolve `"status":"already_redacted"` sem nova auditoria. ID inexistente ou argumento inválido sai com código 1 e mensagem em stderr. O campo `audio_removed` só é `true` quando o arquivo de áudio existia e foi apagado; arquivo ausente ou falha ao apagar dá `false`, e a falha entra no log de erros do PHP com o nome do arquivo. O descarte não pode ser desfeito pela aplicação. Ele não apaga nomes de contas, assuntos, soluções nem eventos de auditoria.
+
+### Mascaramento de dados pessoais
+
+O texto do feedback e a transcrição de áudio têm CPF, telefone (com DDD, com DDD de zero à esquerda como `011`, ou celular sem DDD iniciado em 9, como `98765-4321`) e e-mail trocados por `[CPF omitido]`, `[telefone omitido]` e `[e-mail omitido]` antes de gravar. É regra por padrão (expressão regular), não anonimização completa: nomes próprios e endereços continuam no texto, 11 dígitos soltos viram CPF mesmo se forem celular, fixo sem DDD de 8 dígitos não é reconhecido, e dados gravados antes desta versão não são reprocessados. Para um caso específico, use o comando `redact` acima.
+
 O prazo local de retenção de conteúdo é 12 meses. A rotina remove texto, transcrição, resumo, temas, evidências e arquivo de áudio do feedback, justificativas e ações antigas de revisão, e mensagens antigas. Preserva indicadores estruturados. A extensão desse prazo ao áudio é uma decisão desta versão, pois a política corporativa não foi fornecida. Isso não anonimiza nomes, organizações, assuntos e soluções dos atendimentos; consulte a [arquitetura](arquitetura.md) antes de usar dados reais.
+
+## Backup
+
+O comando copia o banco SQLite de forma consistente (`VACUUM INTO`, seguro mesmo com o servidor em uso) e o diretório de áudio para uma pasta datada:
+
+```powershell
+php bin/console.php backup --dir=D:\backups-cti --keep=30
+```
+
+`--dir` define a pasta de destino (padrão `storage/backups`) e `--keep` quantas cópias ficam (padrão 30; as mais antigas são apagadas). Cada execução cria `cti-backup-AAAAMMDD-HHMMSS/` com `cti.sqlite` e `audio/`, e imprime o caminho e o tamanho. Só pastas com esse nome são consideradas na retenção; nada mais dentro de `--dir` é tocado. O banco e a pasta de áudio seguem `CTI_DB_PATH` e `CTI_STORAGE_PATH`.
+
+Rotina sugerida:
+
+- **Frequência:** diária, de madrugada (por exemplo às 03:00), quando quase não há atendimento.
+- **Cópia fora do servidor:** `--dir` não protege contra perda do próprio disco. Aponte para um disco externo ou sincronize a pasta com armazenamento em nuvem (cliente de sincronização do provedor ou uma ferramenta como rclone).
+- **Retenção:** guardar 30 dias (`--keep=30`, com uma cópia por dia).
+- **Teste de restauração:** uma vez por mês, restaure a cópia mais recente em outra pasta, aponte `CTI_DB_PATH` e `CTI_STORAGE_PATH` para ela, rode `php bin/console.php init` e abra o sistema em outra porta para conferir que os atendimentos aparecem. Backup que nunca foi restaurado é só uma suposição.
+
+Para restaurar de verdade: encerre o servidor e o worker, copie `cti.sqlite` da cópia para o caminho do banco (`storage/cti.sqlite` por padrão), copie `audio/` para `storage/audio/` e inicie de novo.
+
+Agendador de Tarefas do Windows (execute uma vez em um terminal; ajuste os caminhos):
+
+```powershell
+schtasks /Create /SC DAILY /ST 03:00 /TN "CTI Escuta Backup" /TR "php C:\caminho\do\projeto\bin\console.php backup --dir=D:\backups-cti --keep=30"
+```
+
+A tarefa usa o `php` do PATH do usuário que a criou; se preferir, informe o caminho completo do `php.exe`. Conferir com `schtasks /Query /TN "CTI Escuta Backup"` e testar com `schtasks /Run /TN "CTI Escuta Backup"`.
+
+cron (Linux), com `crontab -e`:
+
+```
+0 3 * * * cd /caminho/do/projeto && php bin/console.php backup --dir=/mnt/backup-externo/cti --keep=30 >> storage/backup.log 2>&1
+```
 
 ## IA e transcrição locais
 
@@ -100,7 +153,7 @@ O teste de integração pode ser executado com:
 php tests/backend.php
 ```
 
-Ele usa banco temporário e verifica autenticação, CSRF, acesso por perfil, registro e edição, confirmação do cliente, nova tentativa do supervisor, histórico por tentativa, fechamento após 72 horas, limites de texto, WAV de 60 e 61 segundos, acesso privado ao áudio, revisão e relatórios.
+Ele usa banco temporário e verifica o conteúdo da base de demonstração (feedbacks negativos, neutros, positivos, críticos sem revisão, negativas do cliente e análise com falha), autenticação, CSRF, acesso por perfil, cadastro de cliente, registro com status inicial, alertas e relatório por perfil, registro e edição, confirmação do cliente, nova tentativa do supervisor, histórico por tentativa, fechamento após 72 horas, limites de texto, WAV de 60 e 61 segundos, acesso privado ao áudio, revisão e relatórios.
 
 ### Rodada final com IA e protótipo exportado, 2026-11-06
 
@@ -178,6 +231,6 @@ Os três PDFs do repositório foram baixados e relidos nesta etapa. Naquele mome
 
 ## Limites da entrega
 
-Não foi realizado treinamento ou ajuste com uma base de atendimentos reais da CTI, nem medição de concordância com seus analistas. Os testes reais demonstram inferência e persistência, sem certificar precisão corporativa. O microfone físico da máquina não foi testado: o navegador usa dispositivo sintético, e a transcrição real foi conferida com uma amostra pública em português.
+Não foi realizado treinamento ou ajuste com uma base de atendimentos reais da CTI. Os testes reais demonstram inferência e persistência, sem certificar precisão corporativa. O microfone físico da máquina não foi testado: o navegador usa dispositivo sintético, e a transcrição real foi conferida com uma amostra pública em português.
 
 O limite do Figma foi contornado para consulta visual usando as 22 imagens exportadas fornecidas pelo usuário na pasta `Downloads/CTI Escuta - Protótipo alta fidelidade`. As diferenças funcionais previamente confirmadas prevalecem sobre as imagens: marca oficial, atualização no mesmo formulário, confirmação dentro do portal, nota e resolução, limites de texto e gravação, revisão humana e exportação dos dados reais. Os SVGs usados foram recuperados dos contextos salvos. A logo oficial está em `public/assets/cti-oficial.png`, e os pesos 400, 500, 600 e 700 da fonte Inter também são locais. A comparação não equivale a um teste automático de igualdade de pixels com os dados estáticos do protótipo.
