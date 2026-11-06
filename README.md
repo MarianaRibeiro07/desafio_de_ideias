@@ -41,6 +41,18 @@ desafio_de_ideias/
 
 A numeração das pastas segue a ordem em que o material é produzido no cronograma.
 
+## Executar o CTI Escuta
+
+A aplicação usa PHP 8.4 com `PDO`, `pdo_sqlite` e `mbstring`, Node.js 20 ou superior e npm. No PowerShell, abra a pasta do repositório e execute:
+
+```powershell
+.\iniciar.ps1
+```
+
+O sistema abre em `http://localhost:8080`, com o processamento de IA e transcrição em segundo plano. Na primeira execução, o script instala as dependências e baixa os modelos locais; essa preparação precisa de internet. Depois, a inferência funciona localmente, sem chave de API paga.
+
+Os acessos de demonstração aparecem na tela de login. Banco, gravações, modelos e dependências instaladas ficam fora do versionamento. Consulte [operação e validação](docs/operacao.md) para os comandos de teste, configuração e limites, e [arquitetura](docs/arquitetura.md) para o modelo de dados e os fluxos.
+
 ## Documentos
 
 | Pasta | Arquivo | Conteúdo |
