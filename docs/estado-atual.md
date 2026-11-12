@@ -1,4 +1,38 @@
-# Estado atual do MVP (6 de novembro de 2026)
+# Estado atual do MVP
+
+## Atualização de 11 de novembro de 2026: demonstração hospedada
+
+O escopo foi ajustado para pitch por URL pública. A integração Gemini 3.5
+Flash-Lite foi implementada para processamento sob demanda, por feedback. O teto
+inicial é de 20 tentativas por instalação, com reserva atômica antes da chamada,
+sem repetição automática após falha e sem nova chamada ao reabrir um resultado
+concluído. A análise preserva a revisão humana e registra confiança nula para
+Gemini. A hospedagem proposta é Alwaysdata Free, preservando PHP e SQLite.
+
+Consulte o [plano aprovado](plano-demo-hospedada.md), o [guia de publicação em 12
+etapas](hospedagem.md) e o [brief de automação com Claude Code e Claude in
+Chrome](publicar-com-claude.md). O guia inclui campos dos painéis, comandos por
+terminal, resultados esperados e consulta ao contador sem consumir Gemini.
+
+As contas e as credenciais ainda precisam ser preparadas. Não houve deploy nem
+validação com chave real. A aceitação inicial no servidor reserva somente duas
+chamadas, incluindo eventuais falhas: um texto e um áudio de 10 a 15 segundos.
+Uma terceira solicitação real exige diagnóstico e autorização do usuário.
+
+Na rodada local, 776 verificações passaram: backend 374, análise 43, cliente
+Gemini 40, processamento hospedado 40, HTTP 30, navegador geral 232 e navegador
+hospedado 17. Os resultados Gemini foram simulados e nenhuma chamada real à API
+foi realizada. Também foram conferidos preflight, roteamento Apache e os trechos
+de comandos do guia em ambiente temporário. Isso não comprova a hospedagem final.
+
+Permanecem pendentes: criação das contas, configuração privada na hospedagem,
+publicação, HTTPS remoto e as duas inferências reais com seus tempos registrados.
+Não houve compra de créditos. O brief autoriza configuração gratuita e orienta o
+usuário a concluir qualquer pagamento, se necessário.
+
+## Registro da versão local de 6 de novembro de 2026
+
+As afirmações e pendências abaixo pertencem à rodada local daquela data.
 
 Onde paramos: o MVP está funcional e testado. Os feedbacks recebidos até aqui foram aplicados.
 

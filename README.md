@@ -43,6 +43,22 @@ A numeração das pastas segue a ordem em que o material é produzido no cronogr
 
 ## Executar o CTI Escuta
 
+Para a demonstração hospedada com Gemini por API, siga o [guia de hospedagem](docs/hospedagem.md).
+Ele descreve a criação das contas, a transferência dos arquivos, a configuração
+privada, o HTTPS e a aceitação com um texto e um áudio curto. O [brief de publicação
+com Claude Code e Claude in Chrome](docs/publicar-com-claude.md) orienta a automação
+dessas etapas, com intervenção do usuário em login, permissões e eventual pagamento.
+
+Esse modo usa PHP e SQLite, dispensa modelos locais e processa um feedback por
+solicitação. O teto inicial é de 20 tentativas por instalação, sem repetição
+automática após falha; resultados concluídos são reaproveitados. A análise Gemini
+preserva a revisão humana e não apresenta uma porcentagem de confiança inventada.
+Os testes locais usam respostas simuladas e não consomem a API. Publicação, contas,
+HTTPS remoto e inferência real ainda precisam de validação. Veja o [estado atual](docs/estado-atual.md)
+e o [plano da demonstração](docs/plano-demo-hospedada.md).
+
+Os comandos abaixo correspondem ao modo local anterior.
+
 A aplicação usa PHP 8.4 com `PDO`, `pdo_sqlite` e `mbstring`, Node.js 20 ou superior e npm. No PowerShell, abra a pasta do repositório e execute:
 
 ```powershell
