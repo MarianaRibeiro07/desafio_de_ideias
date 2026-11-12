@@ -1,0 +1,8 @@
+Options -Indexes -MultiViews
+DirectoryIndex disabled
+
+RewriteEngine On
+RewriteCond %{THE_REQUEST} "\s/+[^?\ ]*(?:api|router)\.php(?:[?\ /]|$)" [NC]
+RewriteRule ^ - [R=404,END]
+RewriteRule (^|/)\. - [R=404,END]
+RewriteRule ^ router.php [END]
