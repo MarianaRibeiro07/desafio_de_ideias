@@ -58,6 +58,7 @@ Onde paramos: o MVP está funcional e testado. Os feedbacks recebidos até aqui 
 
 - Figma desatualizado: refazer as telas a partir do app (limite de chamadas do plano esgotado) e apagar as 22 antigas.
 - Adaptador MySQL (o schema existe, o adaptador não).
+- Escalabilidade: listas paginadas, indicadores no banco e a rotina de manutenção fora do bootstrap, só quando o volume exigir. Gatilhos e medições em [escalabilidade](escalabilidade.md). Falta a CTI informar o volume esperado.
 - Equipes, vocabulário e dados reais da CTI (perguntar à empresa).
 - Upload de chamadas longas (MP3 e WAV).
 - Lista de clientes sem data de cadastro (a tabela não guarda o campo).

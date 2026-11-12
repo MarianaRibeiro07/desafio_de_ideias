@@ -296,4 +296,6 @@ Exclusão sob demanda: `php bin/console.php redact --feedback=ID` aplica ao feed
 
 Isso é descarte de conteúdo, não anonimização completa de toda a base: nomes das contas, organizações, assuntos, soluções e eventos não são removidos por essa rotina. Antes de usar dados reais, é necessário definir a política de anonimização e retenção desses outros registros.
 
+Para a evolução com volume (paginação, agregação no banco, MySQL), veja [escalabilidade](escalabilidade.md).
+
 O banco SQLite é o banco utilizado pela aplicação. `database/schema.mysql.sql` descreve a modelagem equivalente para MySQL, mas não implica que o adaptador PHP esteja pronto para executar contra esse banco: há instruções e funções específicas de SQLite na implementação local. A importação do schema MySQL não foi executada nesta validação.

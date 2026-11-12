@@ -79,6 +79,8 @@ Os acessos de demonstração aparecem na tela de login. Banco, gravações, mode
 | 04 | [Matriz-CSD-2026-10-08.png](docs/04-matriz-csd/Matriz-CSD-2026-10-08.png) | Matriz CSD de 08/10/2026 |
 | 05 | [Relatorio-Desafio-de-Ideias.pdf](docs/05-relatorio/Relatorio-Desafio-de-Ideias.pdf) | Relatório com resumo e abstract |
 
+Sobre o que acontece quando o volume de registros crescer, com números medidos e os degraus de evolução, leia [escalabilidade](docs/escalabilidade.md).
+
 ## Andamento
 
 Etapas 1 a 4 (abertura, seleção da demanda, imersão e preparação da entrevista) estão concluídas no cronograma. A etapa 5 (validação com a indústria) está em andamento. Seguem: atualização da Matriz CSD, ideação, seleção da solução, protótipo V1 e V2 e entrega final da 1ª fase. Não é exigido software funcional nesta fase.

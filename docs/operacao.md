@@ -231,6 +231,8 @@ Os três PDFs do repositório foram baixados e relidos nesta etapa. Naquele mome
 
 ## Limites da entrega
 
+Volume: o MVP carrega todos os registros do escopo do usuário a cada carga e foi medido até 10.000 tickets de teste. O servidor responde em menos de 2 s, mas o navegador passa a levar cerca de 2 s por tela com 5.000 tickets. O caminho de crescimento, com gatilhos e critérios, está em [escalabilidade](escalabilidade.md).
+
 Não foi realizado treinamento ou ajuste com uma base de atendimentos reais da CTI. Os testes reais demonstram inferência e persistência, sem certificar precisão corporativa. O microfone físico da máquina não foi testado: o navegador usa dispositivo sintético, e a transcrição real foi conferida com uma amostra pública em português.
 
 O limite do Figma foi contornado para consulta visual usando as 22 imagens exportadas fornecidas pelo usuário na pasta `Downloads/CTI Escuta - Protótipo alta fidelidade`. As diferenças funcionais previamente confirmadas prevalecem sobre as imagens: marca oficial, atualização no mesmo formulário, confirmação dentro do portal, nota e resolução, limites de texto e gravação, revisão humana e exportação dos dados reais. Os SVGs usados foram recuperados dos contextos salvos. A logo oficial está em `public/assets/cti-oficial.png`, e os pesos 400, 500, 600 e 700 da fonte Inter também são locais. A comparação não equivale a um teste automático de igualdade de pixels com os dados estáticos do protótipo.
