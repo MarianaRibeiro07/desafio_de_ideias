@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Cti;
 
+use Closure;
 use DateTimeImmutable;
 use DateTimeZone;
 use PDO;
@@ -18,9 +19,11 @@ final class App {
     private const RESPONSE_MINUTES = ['low'=>480,'medium'=>240,'high'=>60,'critical'=>30];
     private const STATES = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
     private string $storage;
+    private ?Closure $analysisRunner;
 
-    public function __construct(private PDO $pdo, ?string $storage = null) {
+    public function __construct(private PDO $pdo, ?string $storage = null, ?callable $analysisRunner = null) {
         $this->storage = $storage ?? dirname(__DIR__) . '/storage';
+        $this->analysisRunner=$analysisRunner===null?null:Closure::fromCallable($analysisRunner);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         $pdo->exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
@@ -226,10 +229,11 @@ final class App {
             }
             if ($path === '/api/cases' && $method === 'GET') { return $this->ok($this->cases($user,$query)); }
             if ($path === '/api/feedbacks' && $method === 'POST') { return $this->feedback($user,$body,$files); }
-            if (preg_match('#^/api/feedbacks/(\d+)/(review|audio|retry-analysis)$#',$path,$m)) {
+            if (preg_match('#^/api/feedbacks/(\d+)/(review|audio|retry-analysis|analyze)$#',$path,$m)) {
                 $feedback=$this->feedbackById($user,(int)$m[1]);
                 if ($m[2]==='review' && $method==='POST') { return $this->review($user,$feedback,$body); }
                 if ($m[2]==='retry-analysis' && $method==='POST') { return $this->retryAnalysis($user,$feedback); }
+                if ($m[2]==='analyze' && $method==='POST') { return $this->analyzeFeedback($user,$feedback); }
                 if ($m[2]==='audio' && $method==='GET') {
                     if (!$feedback['audio_path'] || !is_file($this->storage.'/audio/'.$feedback['audio_path'])) { $this->fail(404,'Audio indisponivel ou removido pela retencao.'); }
                     return ['status'=>200,'file'=>$this->storage.'/audio/'.$feedback['audio_path'],'headers'=>['Content-Type'=>'audio/wav','Content-Disposition'=>'inline; filename="feedback.wav"','Cache-Control'=>'no-store']];
@@ -314,7 +318,10 @@ final class App {
         if($u['role']==='supervisor'){
             foreach($feedbacks as $f){if($f['criticality']==='critical'&&!$f['reviewed']){$notifications[]=['title'=>'Feedback critico precisa de revisao','message'=>$f['protocol'].' apresenta um sinal para avaliacao humana.','ticket_id'=>$f['ticket_id'],'feedback_id'=>$f['id'],'due_at'=>null,'type'=>'critical'];}}
         }
-        return $this->ok(['user'=>$u,'clients'=>$clients,'teams'=>$teams,'attendants'=>$this->all("SELECT id,name,team_id FROM users WHERE role='attendant'".($u['role']==='manager'?'':' AND team_id=?'),$u['role']==='manager'?[]:[$u['team_id']??0]),'categories'=>$this->all('SELECT * FROM categories'),'tickets'=>$tickets,'feedbacks'=>$feedbacks,'cases'=>$u['role']==='client'?[]:$this->cases($u,[]),'notifications'=>$notifications]);
+        $onDemand=getenv('CTI_ANALYSIS_PROVIDER')==='gemini';
+        $remaining=0;
+        if($onDemand){require_once __DIR__.'/AnalysisWorker.php';$used=(int)$this->run("SELECT COUNT(*) FROM audit_events WHERE event='gemini_request_reserved'")->fetchColumn();$remaining=max(0,AnalysisWorker::requestLimit()-$used);}
+        return $this->ok(['user'=>$u,'clients'=>$clients,'teams'=>$teams,'attendants'=>$this->all("SELECT id,name,team_id FROM users WHERE role='attendant'".($u['role']==='manager'?'':' AND team_id=?'),$u['role']==='manager'?[]:[$u['team_id']??0]),'categories'=>$this->all('SELECT * FROM categories'),'tickets'=>$tickets,'feedbacks'=>$feedbacks,'cases'=>$u['role']==='client'?[]:$this->cases($u,[]),'notifications'=>$notifications,'analysis'=>['on_demand'=>$onDemand,'remaining_requests'=>$remaining]]);
     }
     private function attendant(array $u): void { if ($u['role']!=='attendant') { $this->fail(403,'Somente atendentes podem operar seus atendimentos.'); } }
     private function string(array $b,string $key,int $min,int $max): string {
@@ -479,6 +486,19 @@ final class App {
         if($f['redacted_at']){$this->fail(409,'O conteudo deste feedback ja foi removido pela retencao.');}
         $justification=$this->string($b,'justification',10,1000);$action=$this->string($b,'action',5,1000);
         $this->pdo->beginTransaction();try{$this->run('INSERT INTO reviews(feedback_id,reviewer_id,sentiment,criticality,justification,action,created_at) VALUES (?,?,?,?,?,?,?)',[$f['id'],$u['id'],$sentiment,$criticality,$justification,$action,$this->now()]);$this->run('UPDATE feedbacks SET sentiment=?,criticality=?,reviewed=1 WHERE id=?',[$sentiment,$criticality,$f['id']]);$this->audit($u['id'],$f['ticket_id'],'human_review');$this->pdo->commit();}catch(Throwable $e){$this->pdo->rollBack();throw $e;}
+        return $this->ok($this->publicFeedback($this->feedbackById($u,(int)$f['id'])));
+    }
+    private function analyzeFeedback(array $u,array $f): array {
+        if(!in_array($u['role'],['client','attendant','supervisor'],true)){$this->fail(403,'Este perfil nao pode solicitar analises.');}
+        if(getenv('CTI_ANALYSIS_PROVIDER')!=='gemini'){$this->fail(503,'O processamento hospedado nao esta habilitado.');}
+        if($f['redacted_at']){$this->fail(409,'O conteudo deste feedback foi removido pela retencao.');}
+        if(in_array($f['analysis_status'],['completed','processing'],true)){return $this->ok($this->publicFeedback($f));}
+        if($f['analysis_status']!=='pending'){$this->fail(409,'Esta analise nao esta aguardando processamento. O supervisor pode autorizar nova tentativa em caso de falha.');}
+        if($this->analysisRunner===null && !getenv('CTI_GEMINI_API_KEY')){$this->fail(503,'A analise ainda precisa ser configurada pelo responsavel.');}
+        require_once __DIR__.'/AnalysisWorker.php';
+        if(session_status()===PHP_SESSION_ACTIVE){session_write_close();}
+        $worker=new AnalysisWorker($this->pdo,$this->storage,$this->analysisRunner);
+        $worker->processOne((int)$f['id']);
         return $this->ok($this->publicFeedback($this->feedbackById($u,(int)$f['id'])));
     }
     private function retryAnalysis(array $u,array $f): array {

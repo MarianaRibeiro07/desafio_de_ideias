@@ -12,20 +12,45 @@ use Throwable;
 
 final class AnalysisWorker {
     private Closure $runner;
+    private bool $remote;
 
     public function __construct(private PDO $pdo,private string $storage,?callable $runner=null) {
-        $this->runner=$runner===null?$this->invoke(...):Closure::fromCallable($runner);
+        $this->remote=getenv('CTI_ANALYSIS_PROVIDER')==='gemini';
+        if($runner!==null){$this->runner=Closure::fromCallable($runner);}
+        elseif($this->remote){require_once __DIR__.'/GeminiAnalyzer.php';$this->runner=(new GeminiAnalyzer())->analyze(...);}
+        else{$this->runner=$this->invoke(...);}
     }
 
     private function now(): string {return (new DateTimeImmutable('now',new DateTimeZone('UTC')))->format(DATE_ATOM);}
     private function run(string $sql,array $params=[]): \PDOStatement {$s=$this->pdo->prepare($sql);$s->execute($params);return $s;}
 
-    public function processOne(): ?array {
+    public static function requestLimit(): int {
+        $configured=getenv('CTI_GEMINI_MAX_REQUESTS');
+        if($configured===false || $configured===''){return 20;}
+        if(!ctype_digit($configured) || (int)$configured<1 || (int)$configured>1000){throw new RuntimeException('CTI_GEMINI_MAX_REQUESTS deve ser um inteiro entre 1 e 1000.');}
+        return (int)$configured;
+    }
+
+    public function processOne(?int $feedbackId=null): ?array {
         $stale=(new DateTimeImmutable('-15 minutes',new DateTimeZone('UTC')))->format(DATE_ATOM);
         $this->run("UPDATE feedbacks SET analysis_status='failed',analysis_error='O processamento foi interrompido. Solicite uma nova tentativa ao supervisor.' WHERE analysis_status='processing' AND analysis_started_at<? AND redacted_at IS NULL",[$stale]);
-        $claim=$this->run("UPDATE feedbacks SET analysis_status='processing',analysis_started_at=?,analysis_attempts=analysis_attempts+1,analysis_error=NULL WHERE id=(SELECT id FROM feedbacks WHERE analysis_status='pending' AND redacted_at IS NULL ORDER BY id LIMIT 1) AND analysis_status='pending' AND redacted_at IS NULL RETURNING *",[$this->now()]);
-        $job=$claim->fetch(PDO::FETCH_ASSOC);
-        $claim->closeCursor();
+        if($this->remote){$this->pdo->exec('BEGIN IMMEDIATE');}
+        try {
+            $selection=$feedbackId===null?"(SELECT id FROM feedbacks WHERE analysis_status='pending' AND redacted_at IS NULL ORDER BY id LIMIT 1)":'?';
+            $params=[$this->now()];if($feedbackId!==null){$params[]=$feedbackId;}
+            if($this->remote){
+                $pending=$this->run("SELECT id FROM feedbacks WHERE analysis_status='pending' AND redacted_at IS NULL".($feedbackId===null?' ORDER BY id LIMIT 1':' AND id=?'),$feedbackId===null?[]:[$feedbackId])->fetchColumn();
+                $used=(int)$this->run("SELECT COUNT(*) FROM audit_events WHERE event='gemini_request_reserved'",[])->fetchColumn();
+                if($pending && $used>=self::requestLimit()){throw new HttpError(429,'O limite de analises desta demonstracao foi atingido. Solicite ao responsavel a liberacao de novas tentativas.');}
+            }
+            $claim=$this->run("UPDATE feedbacks SET analysis_status='processing',analysis_started_at=?,analysis_attempts=analysis_attempts+1,analysis_error=NULL WHERE id=$selection AND analysis_status='pending' AND redacted_at IS NULL RETURNING *",$params);
+            $job=$claim->fetch(PDO::FETCH_ASSOC);
+            $claim->closeCursor();
+            if($this->remote){
+                if($job){$this->run("INSERT INTO audit_events(user_id,ticket_id,event,created_at) VALUES (NULL,?,'gemini_request_reserved',?)",[$job['ticket_id'],$this->now()]);}
+                $this->pdo->exec('COMMIT');
+            }
+        }catch(Throwable $e){if($this->remote){$this->pdo->exec('ROLLBACK');}throw $e;}
         if(!$job){return null;}
         try {
             $audio=null;
@@ -38,7 +63,7 @@ final class AnalysisWorker {
             $result=($this->runner)(['text'=>$job['mode']==='text'?$job['text']:null,'audio_path'=>$audio]);
             $result=$this->validate($result,$job['mode']);
             $criticality=!(bool)$job['resolved']?'critical':$result['criticality'];
-            $updated=$this->run("UPDATE feedbacks SET analysis_status='completed',analysis_error=NULL,analyzed_at=?,transcript=?,confidence=?,topics=?,evidence=?,analysis_model=?,transcription_model=?,original_sentiment=?,original_criticality=?,original_summary=?,analysis_source='local_model',sentiment=CASE WHEN reviewed=0 THEN ? ELSE sentiment END,criticality=CASE WHEN reviewed=0 THEN ? ELSE criticality END,summary=? WHERE id=? AND analysis_status='processing' AND analysis_attempts=? AND redacted_at IS NULL",[$this->now(),$result['transcript'],$result['confidence'],json_encode($result['topics'],JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),json_encode($result['evidence'],JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),$result['model'],$result['transcription_model'],$result['sentiment'],$criticality,$result['summary'],$result['sentiment'],$criticality,$result['summary'],$job['id'],$job['analysis_attempts']]);
+            $updated=$this->run("UPDATE feedbacks SET analysis_status='completed',analysis_error=NULL,analyzed_at=?,transcript=?,confidence=?,topics=?,evidence=?,analysis_model=?,transcription_model=?,original_sentiment=?,original_criticality=?,original_summary=?,analysis_source=?,sentiment=CASE WHEN reviewed=0 THEN ? ELSE sentiment END,criticality=CASE WHEN reviewed=0 THEN ? ELSE criticality END,summary=CASE WHEN reviewed=0 THEN ? ELSE summary END WHERE id=? AND analysis_status='processing' AND analysis_attempts=? AND redacted_at IS NULL",[$this->now(),$result['transcript'],$result['confidence'],json_encode($result['topics'],JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),json_encode($result['evidence'],JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),$result['model'],$result['transcription_model'],$result['sentiment'],$criticality,$result['summary'],$this->remote?'gemini_api':'local_model',$result['sentiment'],$criticality,$result['summary'],$job['id'],$job['analysis_attempts']]);
             return ['id'=>(int)$job['id'],'status'=>$updated->rowCount()?'completed':'discarded'];
         } catch(Throwable $e){
             error_log('CTI analysis feedback '.(int)$job['id'].': '.$e->getMessage());
@@ -49,7 +74,8 @@ final class AnalysisWorker {
 
     private function validate(mixed $result,string $mode): array {
         if(!is_array($result) || !in_array($result['sentiment']??null,['positive','neutral','negative'],true) || !in_array($result['criticality']??null,['critical','regular'],true)) {throw new RuntimeException('Resultado de classificacao invalido.');}
-        if(!isset($result['confidence']) || !is_numeric($result['confidence']) || !is_finite((float)$result['confidence']) || $result['confidence']<0 || $result['confidence']>1){throw new RuntimeException('Score de modelo invalido.');}
+        if($this->remote){$result['confidence']=null;}
+        elseif(!isset($result['confidence']) || !is_numeric($result['confidence']) || !is_finite((float)$result['confidence']) || $result['confidence']<0 || $result['confidence']>1){throw new RuntimeException('Score de modelo invalido.');}
         foreach(['summary'=>1000,'model'=>180] as $key=>$limit){if(!isset($result[$key]) || !is_string($result[$key]) || trim($result[$key])==='' || mb_strlen($result[$key])>$limit){throw new RuntimeException('Campo de analise invalido: '.$key);}}
         foreach(['topics','evidence'] as $key){if(!isset($result[$key]) || !is_array($result[$key]) || !array_is_list($result[$key]) || count($result[$key])>20){throw new RuntimeException('Lista de analise invalida.');}foreach($result[$key] as $text){if(!is_string($text) || mb_strlen($text)>1000){throw new RuntimeException('Trecho de analise invalido.');}}}
         $result['transcript']=$result['transcript']??null;

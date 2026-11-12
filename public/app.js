@@ -19,6 +19,9 @@ let restoreFocus = null;
 let activeMutations = 0;
 let mutationVersion = 0;
 let notificationPollInFlight = false;
+let hostedAnalysisInFlight = false;
+let hostedQueueUser = null;
+let hostedQueue = new Set();
 
 function esc(value = '') { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function num(value) { return Number.isFinite(Number(value)) ? Number(value) : 0; }
@@ -53,7 +56,7 @@ async function api(path, options = {}) {
   return json.data;
   } finally { if (mutation) activeMutations--; }
 }
-function demoBanner() { return `<div class="banner" role="note">${icon('20913')}<div><strong>Escuta com apoio de IA.</strong> Novos relatos são analisados localmente. A base inicial contém exemplos fictícios identificados nos detalhes.</div></div>`; }
+function demoBanner() { return `<div class="banner" role="note">${icon('20913')}<div><strong>Escuta com apoio de IA.</strong> ${state.data?.analysis?.on_demand ? 'Novos relatos podem ser analisados pelo Gemini. Use somente exemplos fictícios nesta demonstração.' : 'Novos relatos são analisados localmente.'} A base inicial contém exemplos fictícios identificados nos detalhes.</div></div>`; }
 let themeMemory = null;
 function dashDark() { if (themeMemory !== null) return themeMemory; try { return localStorage.getItem('cti-tema') === 'escuro'; } catch { return false; } }
 function brand(onLight = false) { return onLight ? `<div class="brand brand-dark"><div><span class="brand-logo"><img src="/assets/cti-oficial.png" width="416" height="158" alt="CTI, conectando empresas e pessoas"></span><div class="brand-word">escuta</div></div></div>` : `<div class="brand"><div><span class="brand-logo brand-logo-white"><img src="/assets/cti-logo-branca.png" width="131" height="109" alt="CTI, conectando empresas e pessoas"></span><div class="brand-word">escuta</div></div></div>`; }
@@ -76,6 +79,48 @@ function shell(content) {
   document.title = `${title} | CTI Escuta`;
 }
 async function refreshData() { state.data = await api('/bootstrap'); state.user = state.data.user || state.user; }
+function loadHostedQueue() {
+  if (hostedQueueUser === state.user?.id) return;
+  hostedQueueUser = state.user?.id;
+  hostedQueue = new Set();
+  if (!hostedQueueUser) return;
+  try { const saved = JSON.parse(sessionStorage.getItem(`cti-analysis-${hostedQueueUser}`) || '[]'); if (Array.isArray(saved)) hostedQueue = new Set(saved.filter(id => Number.isInteger(id) && id > 0)); } catch { /* A fila em memoria continua disponivel nesta aba. */ }
+}
+function saveHostedQueue() {
+  try { sessionStorage.setItem(`cti-analysis-${hostedQueueUser}`, JSON.stringify([...hostedQueue])); } catch { /* Sem persistencia, o botao manual permite solicitar uma analise pendente. */ }
+}
+function queueHostedAnalysis(id) {
+  if (!state.data?.analysis?.on_demand || state.user?.role === 'manager') return;
+  loadHostedQueue();
+  const feedback = state.data.feedbacks.find(item => Number(item.id) === Number(id));
+  if (!feedback || feedback.analysis_status !== 'pending') return;
+  hostedQueue.add(Number(id)); saveHostedQueue();
+  return runHostedAnalysis();
+}
+async function runHostedAnalysis() {
+  if (hostedAnalysisInFlight || !state.user || !state.data?.analysis?.on_demand || state.user.role === 'manager') return;
+  loadHostedQueue();
+  const id = [...hostedQueue].find(value => state.data.feedbacks.some(item => Number(item.id) === value && item.analysis_status === 'pending'));
+  if (!id) { hostedQueue.clear(); saveHostedQueue(); return; }
+  hostedQueue.delete(id); saveHostedQueue();
+  hostedAnalysisInFlight = true;
+  const user = state.user.id;
+  const csrf = state.csrf;
+  try {
+    const feedback = await api(`/feedbacks/${id}/analyze`, { method: 'POST' });
+    if (state.user?.id !== user || state.csrf !== csrf) return;
+    state.data.feedbacks = state.data.feedbacks.map(item => Number(item.id) === id ? feedback : item);
+    updateAnalysisViews();
+    if (feedback.analysis_status === 'failed') toast('O relato foi salvo, mas a análise não foi concluída. O supervisor pode autorizar outra tentativa.', true);
+    await refreshData();
+    if (state.user?.id === user && state.csrf === csrf) { updateAnalysisViews(); await updateAnalysisReport(); }
+  } catch (error) {
+    if (state.user?.id === user && state.csrf === csrf) toast(`Feedback preservado. ${error.message}`, true);
+  } finally {
+    hostedAnalysisInFlight = false;
+    if (state.user?.id === user && state.csrf === csrf && hostedQueue.size) void runHostedAnalysis();
+  }
+}
 async function render() {
   const id = ++state.renderId;
   stopRecording(true);
@@ -212,20 +257,23 @@ function transcriptContent(feedback) {
 function analysisContent(feedback) {
   const status = feedback.analysis_status;
   if (feedback.redacted_at) return '<h3>Análise automática original</h3><p class="small">Conteúdo removido pela política de retenção.</p>';
-  if (status === 'pending' || status === 'processing') return `<h3>Análise automática original</h3><div class="analysis-progress" role="status"><span class="spinner" aria-hidden="true"></span><div><strong>${status === 'processing' ? 'Analisando seu relato' : 'Aguardando processamento'}</strong><p>${feedback.mode === 'audio' ? 'O áudio será transcrito e o sentimento será analisado.' : 'O sentimento do texto será analisado.'} O resultado aparece automaticamente, sem interromper sua revisão.</p></div></div>`;
+  if (status === 'pending' || status === 'processing') return `<h3>Análise automática original</h3><div class="analysis-progress" role="status"><span class="spinner" aria-hidden="true"></span><div><strong>${status === 'processing' ? 'Analisando seu relato' : 'Aguardando processamento'}</strong><p>${feedback.mode === 'audio' ? 'O áudio será transcrito e o sentimento será analisado.' : 'O sentimento do texto será analisado.'} O resultado aparece automaticamente, sem interromper sua revisão.</p></div></div>${status === 'pending' && state.data?.analysis?.on_demand && state.user.role !== 'manager' ? `<button type="button" class="btn btn-small" data-action="analyze-feedback" data-id="${num(feedback.id)}">Analisar relato</button>` : ''}`;
   if (status === 'failed') return `<h3>Análise automática original</h3><div class="banner banner-warning compact" role="status"><div><strong>Não foi possível concluir a análise.</strong><p>Seu feedback foi preservado. A equipe pode ouvir ou ler o relato e solicitar outra tentativa.</p></div></div>${state.user.role === 'supervisor' ? `<button type="button" class="btn btn-small" data-action="retry-analysis" data-id="${num(feedback.id)}">Tentar análise novamente</button>` : ''}`;
   const source = feedback.analysis_source;
   const model = feedback.model || feedback.analysis_model;
   const hasModel = status === 'completed' && Boolean(model);
+  const remote = source === 'gemini_api';
   const sentiment = feedback.original_sentiment || (feedback.reviewed ? null : feedback.sentiment);
   const criticality = feedback.original_criticality || (feedback.reviewed ? null : feedback.criticality);
   const summary = feedback.original_summary || (feedback.reviewed ? null : feedback.summary);
   const score = hasModel && feedback.confidence !== null && feedback.confidence !== undefined && Number.isFinite(Number(feedback.confidence)) ? `${Math.round(Math.min(1, Math.max(0, Number(feedback.confidence))) * 100)}%` : null;
   const topics = Array.isArray(feedback.topics) ? feedback.topics : [];
   const evidence = Array.isArray(feedback.evidence) ? feedback.evidence : [];
-  return `<h3>Análise automática original</h3><div class="button-row">${sentiment ? badge(sentiment, sentimentNames) : '<span class="small">Classificação original não registrada.</span>'}${criticality ? badge(criticality, criticalityNames) : ''}</div><dl class="description-list"><dt>${hasModel ? 'Resumo extrativo' : 'Resumo'}</dt><dd>${esc(summary || 'Não registrado separadamente da revisão humana.')}</dd><dt>Assuntos</dt><dd>${topics.length ? topics.map(esc).join(', ') : 'Não identificados.'}</dd><dt>Evidências</dt><dd>${evidence.length ? evidence.map(item => `“${esc(item)}”`).join(', ') : 'Sem trechos de alerta identificados.'}</dd><dt>Score do modelo</dt><dd>${score || (source === 'rating' ? 'Não se aplica à avaliação por nota.' : 'Não disponível para este registro.')}</dd><dt>Confirmação</dt><dd>${feedback.resolved ? 'Cliente confirmou a solução.' : 'Cliente ainda precisa de ajuda.'}</dd></dl><p class="analysis-source">${hasModel ? `Sentimento por IA local: ${esc(model)}.${feedback.transcription_model ? ` Transcrição: ${esc(feedback.transcription_model)}.` : ''} Resumo, assuntos e alertas usam extração de trechos e regras locais. O score não é uma garantia de acerto.` : source === 'rating' ? 'Avaliação rápida: sentimento derivado da nota, sem inferência de IA.' : 'Registro de demonstração: classificação por regras locais.'}</p>`;
+  const scoreContent = remote ? '' : `<dt>Score do modelo</dt><dd>${score || (source === 'rating' ? 'Não se aplica à avaliação por nota.' : 'Não disponível para este registro.')}</dd>`;
+  const sourceContent = remote ? `Análise pela API Gemini: ${esc(model)}. Transcrição, sentimento e resumo podem conter erros. A revisão humana continua necessária.` : hasModel ? `Sentimento por IA local: ${esc(model)}.${feedback.transcription_model ? ` Transcrição: ${esc(feedback.transcription_model)}.` : ''} Resumo, assuntos e alertas usam extração de trechos e regras locais. O score não é uma garantia de acerto.` : source === 'rating' ? 'Avaliação rápida: sentimento derivado da nota, sem inferência de IA.' : 'Registro de demonstração: classificação por regras locais.';
+  return `<h3>Análise automática original</h3><div class="button-row">${sentiment ? badge(sentiment, sentimentNames) : '<span class="small">Classificação original não registrada.</span>'}${criticality ? badge(criticality, criticalityNames) : ''}</div><dl class="description-list"><dt>${remote ? 'Resumo por IA' : hasModel ? 'Resumo extrativo' : 'Resumo'}</dt><dd>${esc(summary || 'Não registrado separadamente da revisão humana.')}</dd><dt>Assuntos</dt><dd>${topics.length ? topics.map(esc).join(', ') : 'Não identificados.'}</dd><dt>Evidências</dt><dd>${evidence.length ? evidence.map(item => `“${esc(item)}”`).join(', ') : 'Sem trechos de alerta identificados.'}</dd>${scoreContent}<dt>Confirmação</dt><dd>${feedback.resolved ? 'Cliente confirmou a solução.' : 'Cliente ainda precisa de ajuda.'}</dd></dl><p class="analysis-source">${sourceContent}</p>`;
 }
-function analysisKey(feedback) { return JSON.stringify([feedback.id, feedback.analysis_status, feedback.transcript, feedback.original_sentiment, feedback.original_criticality, feedback.original_summary, feedback.summary, feedback.sentiment, feedback.criticality, feedback.reviewed, feedback.confidence, feedback.redacted_at]); }
+function analysisKey(feedback) { return JSON.stringify([feedback.id, feedback.analysis_status, feedback.transcript, feedback.original_sentiment, feedback.original_criticality, feedback.original_summary, feedback.summary, feedback.sentiment, feedback.criticality, feedback.reviewed, feedback.confidence, feedback.redacted_at, feedback.analysis_source, feedback.analysis_model]); }
 function updateAnalysisViews() {
   const feedback = state.data.feedbacks.find(item => Number(item.id) === Number(state.modalFeedbackId));
   if (dialog.open && feedback) {
@@ -906,7 +954,9 @@ async function submitForm(form) {
       if (state.recording) throw new Error('Pare a gravação e ouça seu feedback antes de enviar.');
       if (state.formMode === 'audio') { if (!state.audio) throw new Error('Grave seu feedback ou use Descartar áudio e trocar formato para enviar só a nota.'); payload = new FormData(); payload.append('ticket_id', ticketId); payload.append('rating', data.rating); payload.append('resolved', resolved ? '1' : '0'); payload.append('mode', 'audio'); payload.append('audio', state.audio.blob, 'feedback.wav'); }
       else { const text = (data.text || '').trim(); if (text.length > 500 || text.split(/\r?\n/).length > 5) throw new Error('Escreva um feedback com até 500 caracteres e 5 linhas.'); payload = { ticket_id: ticketId, rating: num(data.rating), resolved, mode: text ? 'text' : 'quick', ...(text ? { text } : {}) }; }
-      const received = await api('/feedbacks', { method: 'POST', body: payload }); clearAudio(); await refreshData(); state.decision = null; document.querySelector('#page-content').innerHTML = `<section class="card success-card"><div class="success-check">✓</div><div class="eyebrow">Feedback recebido</div><h2>Obrigado por compartilhar sua experiência.</h2><p>${resolved ? 'Feedback recebido. Sua confirmação foi registrada e o atendimento será encerrado.' : 'Feedback recebido. A equipe foi informada de que você ainda precisa de ajuda e seguirá acompanhando o problema com você.'}</p><div class="receipt-protocol"><small>Protocolo</small><strong>${esc(received.protocol || 'Disponível em meus feedbacks')}</strong></div><div class="button-row" style="justify-content:center">${link('Ver meus feedbacks', 'feedbacks')}${btn('Voltar ao início', 'client-home')}</div></section>`; return;
+      const received = await api('/feedbacks', { method: 'POST', body: payload }); clearAudio(); await refreshData(); state.decision = null; document.querySelector('#page-content').innerHTML = `<section class="card success-card"><div class="success-check">✓</div><div class="eyebrow">Feedback recebido</div><h2>Obrigado por compartilhar sua experiência.</h2><p>${resolved ? 'Feedback recebido. Sua confirmação foi registrada e o atendimento será encerrado.' : 'Feedback recebido. A equipe foi informada de que você ainda precisa de ajuda e seguirá acompanhando o problema com você.'}</p><div class="receipt-protocol"><small>Protocolo</small><strong>${esc(received.protocol || 'Disponível em meus feedbacks')}</strong></div><div class="button-row" style="justify-content:center">${link('Ver meus feedbacks', 'feedbacks')}${btn('Voltar ao início', 'client-home')}</div></section>`;
+      queueHostedAnalysis(num(received.id));
+      return;
     }
   } catch (error) { formError(form, error); }
   finally { controls.forEach(b => b.disabled = false); }
@@ -927,7 +977,8 @@ document.addEventListener('click', async event => {
     else if (action === 'decision-clear' || action === 'client-home') { stopRecording(true); clearAudio(); state.formMode = 'text'; state.decision = null; if (action === 'client-home') await render(); else document.querySelector('#page-content').innerHTML = feedbackFormPage(); }
     else if (action === 'feedback-detail') await openFeedback(target.dataset.id);
     else if (action === 'ticket-detail') await openTicket(target.dataset.id);
-    else if (action === 'retry-analysis') { target.disabled = true; try { await api(`/feedbacks/${num(target.dataset.id)}/retry-analysis`, { method: 'POST' }); await refreshData(); updateAnalysisViews(); toast('Análise adicionada novamente à fila.'); } finally { target.disabled = false; } }
+    else if (action === 'analyze-feedback') { target.disabled = true; try { await queueHostedAnalysis(num(target.dataset.id)); } finally { if (target.isConnected) target.disabled = false; } }
+    else if (action === 'retry-analysis') { target.disabled = true; try { await api(`/feedbacks/${num(target.dataset.id)}/retry-analysis`, { method: 'POST' }); await refreshData(); updateAnalysisViews(); toast('Análise adicionada novamente à fila.'); queueHostedAnalysis(num(target.dataset.id)); } finally { target.disabled = false; } }
     else if (action === 'apply-case') { const c = state.caseResults.find(c => Number(c.id) === Number(target.dataset.id)); if (c) { document.querySelector('#subject').value = c.subject; state.selectedCategory = c.category_id; document.querySelector('#subject-suggestions').hidden = true; document.querySelector('#subject').setAttribute('aria-expanded', 'false'); const solution = document.querySelector('#solution'); if (solution && !solution.value) solution.value = c.solution; toast('Assunto preenchido a partir do case de resolução.'); } }
     else if (action === 'feedback-mode') changeMode(target.dataset.mode);
     else if (action === 'clear-feedback') clearFeedback();
@@ -956,7 +1007,7 @@ dialog.addEventListener('click', event => { if (event.target === dialog) { const
 dialog.addEventListener('cancel', () => { state.modalFeedbackId = null; });
 window.addEventListener('hashchange', () => { if (dialog.open) closeDialog(); state.decision = null; state.filters = {}; render(); });
 window.addEventListener('pagehide', () => { stopRecording(true); clearAudio(); });
-async function init() { try { const session = await api('/session'); state.user = session.user; state.csrf = session.csrf_token; await render(); } catch (error) { app.innerHTML = `<main id="main" class="initial-loading"><div><h2>Não foi possível abrir a plataforma.</h2><p>${esc(error.message)}</p>${btn('Tentar novamente', 'refresh')}</div></main>`; } }
+async function init() { try { const session = await api('/session'); state.user = session.user; state.csrf = session.csrf_token; await render(); loadHostedQueue(); void runHostedAnalysis(); } catch (error) { app.innerHTML = `<main id="main" class="initial-loading"><div><h2>Não foi possível abrir a plataforma.</h2><p>${esc(error.message)}</p>${btn('Tentar novamente', 'refresh')}</div></main>`; } }
 function notificationKey(notification) { return JSON.stringify([notification.type, notification.ticket_id, notification.feedback_id, notification.due_at]); }
 function updateNotificationCounter(notifications) {
   const button = document.querySelector('[data-action="notifications"]');
