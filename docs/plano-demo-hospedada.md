@@ -115,8 +115,7 @@ Task 1.2.2: pacote de hospedagem.
 
 **Épico 2.1: conta e publicação.** Criar contas Alwaysdata e Google AI Studio,
 inserir o segredo no ambiente privado, conferir SQLite e HTTPS no servidor,
-publicar e executar preflight. Saker informou que ainda precisa criar ambas
-as contas. A fase será detalhada contra a conta real e suas credenciais.
+publicar e executar preflight. Concluído em 13/11/2026 na conta `ctiescuta`.
 
 **Épico 2.2: prova e pitch.** Executar um texto e um áudio curto, registrar duração
 e resultado, preparar casos previamente analisados e ensaiar cliente, supervisor
@@ -135,9 +134,11 @@ participação do usuário. Não foi comprovada a conexão dessa integração ne
 - [x] Interface distingue Gemini e exibe resultados sem recarregar formulário.
 - [x] Pacote PHP com raiz pública e segredos privados documentados.
 - [x] Guia descritivo e brief de automação preparados.
-- [ ] Contas e credenciais disponíveis para a publicação.
-- [ ] URL HTTPS acessível em outra máquina.
-- [ ] Um texto e um áudio curto analisados no servidor com tempo registrado.
+- [x] Contas e credenciais disponíveis para a publicação.
+- [ ] URL HTTPS acessível em outra máquina. Em 13/11/2026 abriu com HTTPS válido
+  neste PC por duas redes; outra máquina ainda não foi conferida.
+- [x] Um texto e um áudio curto analisados no servidor com tempo registrado
+  (13/11/2026; detalhes em [estado atual](estado-atual.md)).
 
 ## Evidência da fase 1 e desvios
 

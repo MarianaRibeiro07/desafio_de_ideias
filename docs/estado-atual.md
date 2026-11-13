@@ -1,5 +1,66 @@
 # Estado atual do MVP
 
+## Atualização de 13 de novembro de 2026: publicado e validado com Gemini real
+
+URL pública: https://ctiescuta.alwaysdata.net (Alwaysdata Free, conta `ctiescuta`,
+PHP 8.4, SQLite, Force HTTPS). Versão publicada: commit `685e6c7` da branch
+`feat/mvp-hospedado-gemini`.
+
+Caminhos efetivos no servidor:
+
+- Código: `/home/ctiescuta/cti` (`src`, `database`, `bin`, `public`).
+- Raiz pública do site: `cti/public/`. No painel, a raiz é relativa a
+  `/home/ctiescuta/`, e não um caminho absoluto como o guia supunha.
+- Configuração privada: `/home/ctiescuta/private/cti-env.php` (permissão 600),
+  carregada por `auto_prepend_file` no php.ini do site.
+- Banco e áudios: `/home/ctiescuta/private/cti-storage`.
+
+Conferências sem consumo: preflight com 11 `PASS` e saída 0; banco inicializado;
+HTTP redireciona para HTTPS (301); certificado válido; `/src/App.php`,
+`/database/schema.sqlite.sql`, `/storage/cti.sqlite`, `/.git/config`,
+`/router.php` e `/api.php` retornam 404; API sem login retorna 401.
+
+Chamadas reais ao Gemini, ambas da empresa Grupo Aurora Logistica:
+
+| Feedback | Atendimento | Entrada | Tempo | Resultado |
+|---|---|---|---|---|
+| FDB-2026-0032 | ATD-2026-0043 | texto | até 14 s | negativo, crítico, resumo fiel |
+| FDB-2026-0033 | ATD-2026-0044 | áudio anexado de 21 s | cerca de 3 s | transcrição fiel, negativo, crítico |
+
+Contador: 2 de 20 reservas, uma por chamada, sem falhas. Reabrir os dois
+resultados quatro vezes e recarregar a página não alterou o contador. Não houve
+pagamento; o projeto Gemini segue na faixa gratuita.
+
+Nesta rodada também entrou a opção de **anexar áudio** no feedback do cliente
+(commit `a8a623c`). Escrever, gravar e anexar são formas exclusivas, uma por
+envio. O anexo é convertido no navegador em WAV mono de 16 bits a 16 kHz e segue
+o mesmo caminho da gravação. Teste de navegador local: 239 de 240; a falha
+restante é anterior a esta mudança (ver pendências).
+
+Desvios do guia: a rede da escola bloqueia a porta 22, então o código foi
+clonado do GitHub direto no servidor e os comandos rodaram no terminal web do
+painel. Depois, o filtro DNS da mesma rede passou a desviar `*.alwaysdata.net`
+para `146.112.61.110`; a publicação foi concluída pela rede do celular. Para o
+pitch, confira antes se a rede do local abre a URL.
+
+Pendências abertas nesta rodada:
+
+- Abrir a URL em outra máquina ou celular e ensaiar o gestor (Helena).
+- Feedback marcado como "Resolveu" com conteúdo classificado como crítico pela
+  IA encerra o atendimento sem alertar o supervisor. Decidir se a análise deve
+  gerar alerta nesse caso.
+- A lista do supervisor mostra "Áudio gravado" também para áudio anexado; o
+  servidor não guarda a diferença.
+- O player do áudio na revisão mostra duração `Infinity` e não exibe o tempo
+  total, embora reproduza o arquivo completo. Causa não verificada; suspeita de
+  falta de `Content-Length` ou suporte a `Range` na rota de áudio.
+- O painel de gravação ainda diz que o áudio é analisado "neste computador".
+- O teste `Login sem textos de projeto academico no rodape` em
+  `tests/browser.mjs` falha desde o commit `f138e99`, que mudou os textos do
+  login.
+- O teste `tests/hosted-browser.mjs` falhou uma vez em quatro com
+  `Invalid InterceptionId` e passou nas outras; instabilidade do próprio teste.
+
 ## Atualização de 11 de novembro de 2026: demonstração hospedada
 
 O escopo foi ajustado para pitch por URL pública. A integração Gemini 3.5
