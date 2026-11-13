@@ -1,5 +1,58 @@
 # Estado atual do MVP
 
+## Atualização de 13 de novembro de 2026 (noite): gestão de usuários publicada
+
+Endereço para o pitch: **https://cti-escuta-proxy.vercel.app**. É um repasse na
+Vercel (conta `rbrecci`, configuração em `projects/cti-escuta-proxy/vercel.json`,
+fora deste repositório) que encaminha tudo para `ctiescuta.alwaysdata.net`. Ele
+existe porque o filtro DNS da rede da escola bloqueia o endereço da Alwaysdata e
+deixa passar o da Vercel. Mesmo servidor, mesmo banco e mesma chave Gemini.
+
+Publicado o commit `e33d80a`, com backup anterior em
+`~/private/backups/cti-backup-20261113-154623`. A migração preservou os 9
+usuários ativos, os dois resultados reais do Gemini e o contador em 2 de 20. Plano
+e decisões em [gestão de usuários](plano-gestao-usuarios.md).
+
+O fluxo completo foi testado pelo Saker no endereço da Vercel. Depois disso, a
+tela `/clientes/` dava 404 nesse endereço: a regra de repasse não casava caminho
+terminado em barra, e `/clientes` sem barra redirecionava para o domínio
+bloqueado. A configuração foi corrigida e republicada; `/clientes/` agora
+responde 200 pela Vercel. Falta repetir o cadastro de empresa logado por esse
+endereço.
+
+### Pendências pedidas pelo Saker, para depois
+
+**1. Editar e excluir clientes, atendentes e supervisores.** Hoje existe só
+criar, para os três, e desativar e reativar, para atendentes e supervisores.
+Falta:
+
+- Cliente (empresa): editar nome, cidade, UF e o e-mail do login; excluir.
+- Atendente: editar nome e e-mail; excluir.
+- Supervisor: editar nome, e-mail e equipe; excluir.
+
+Decisão a tomar antes do código: o que "excluir" significa. Usuários e empresas
+são referenciados por atendimentos, feedbacks, revisões e auditoria, com chave
+estrangeira. Apagar a linha quebraria o histórico ou seria recusado pelo banco.
+Opções:
+
+- (a) Excluir só quem nunca teve atendimento; para o resto, a interface oferece
+  desativar.
+- (b) Excluir vira desativar e some das listas, preservando o histórico.
+
+A inclinação é (a) com o (b) como saída, porque cadastro errado e recém-criado é
+o caso real de exclusão.
+
+Regras herdadas que valem também para editar:
+
+- Trocar a equipe de um supervisor não pode deixar a equipe de origem sem
+  supervisor ativo.
+- O e-mail novo não pode estar em uso.
+
+**2. Mais cuidado com o frontend da tela de cadastro de empresa
+(`public/clientes/`).** O escopo ainda não foi definido: falta o Saker apontar o
+que incomoda, por exemplo visual, ordem dos campos, mensagens ou o fato de ser
+um app separado, com estilo próprio. Precisa ser definido antes de virar task.
+
 ## Atualização de 13 de novembro de 2026: publicado e validado com Gemini real
 
 URL pública: https://ctiescuta.alwaysdata.net (Alwaysdata Free, conta `ctiescuta`,
