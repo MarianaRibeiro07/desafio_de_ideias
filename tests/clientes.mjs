@@ -9,6 +9,7 @@ const base = process.env.CTI_BASE_URL ?? 'http://127.0.0.1:8095';
 const executable = process.env.CTI_BROWSER ?? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const password = 'CtiDemo2026!';
 const clientName = `QA Cadastro ${Date.now()}`;
+const clientEmail = `qa.empresa.${Date.now()}@cti.demo`;
 await mkdir(profile, { recursive: true });
 const errors = [];
 const pending = new Map();
@@ -48,8 +49,8 @@ async function login(email) {
   await until('!!document.querySelector("#login-view") && !document.querySelector("#login-view").hidden', `login ${email}`);
   await evaluate(`(() => { document.querySelector('#login-email').value=${JSON.stringify(email)};document.querySelector('#login-password').value=${JSON.stringify(password)};document.querySelector('#login-form').requestSubmit(); })()`);
 }
-async function submitClient(name, city, state) {
-  await evaluate(`(() => { document.querySelector('#cliente-nome').value=${JSON.stringify(name)};document.querySelector('#cliente-cidade').value=${JSON.stringify(city)};document.querySelector('#cliente-uf').value=${JSON.stringify(state)};document.querySelector('#cadastro-form').requestSubmit(); })()`);
+async function submitClient(name, city, state, email = '') {
+  await evaluate(`(() => { document.querySelector('#cliente-nome').value=${JSON.stringify(name)};document.querySelector('#cliente-cidade').value=${JSON.stringify(city)};document.querySelector('#cliente-uf').value=${JSON.stringify(state)};const e=document.querySelector('#cliente-email');if(e)e.value=${JSON.stringify(email)};document.querySelector('#cadastro-form').requestSubmit(); })()`);
 }
 
 try {
@@ -78,17 +79,27 @@ try {
   check('Titulo da pagina', (await evaluate('document.title')) === 'CTI Escuta, Cadastro de clientes');
   check('Select de UF com 27 estados', (await evaluate('document.querySelectorAll("#cliente-uf option:not([value=\\"\\"])").length')) === 27);
   check('Link para o sistema geral', await evaluate('[...document.querySelectorAll("a")].some(a => a.getAttribute("href") === "/")'));
-  check('Campos com label associado', await evaluate('["cliente-nome","cliente-cidade","cliente-uf","busca"].every(id => document.querySelector(`label[for="${id}"]`))'));
+  check('Campos com label associado', await evaluate('["cliente-nome","cliente-cidade","cliente-uf","cliente-email","busca"].every(id => document.querySelector(`label[for="${id}"]`))'));
+  check('Campo de e-mail de acesso obrigatorio com rotulo e dica da senha padrao', await evaluate(`(() => { const e = document.querySelector('#cliente-email'); const hint = document.getElementById(e?.getAttribute('aria-describedby') ?? ''); return e?.type === 'email' && e.required && document.querySelector('label[for="cliente-email"]').textContent.trim() === 'E-mail de acesso da empresa' && /senha padrão/.test(hint?.textContent ?? ''); })()`));
 
-  await submitClient(clientName, 'Campinas', 'SP');
+  await submitClient(`${clientName} sem email`, 'Campinas', 'SP');
+  await until('document.querySelector("#mensagem")?.classList.contains("erro")', 'erro sem e-mail');
+  check('Cadastro sem e-mail e recusado na tela', /e-mail/i.test(await evaluate('document.querySelector("#mensagem").innerText')) && !(await evaluate(`document.querySelector('#lista').innerText.includes(${JSON.stringify(`${clientName} sem email`)})`)), await evaluate('document.querySelector("#mensagem").innerText'));
+
+  await submitClient(clientName, 'Campinas', 'SP', clientEmail);
   await until(`document.querySelector('#lista')?.innerText.includes(${JSON.stringify(clientName)})`, 'cliente na lista');
   const row = await evaluate(`(() => { const li = [...document.querySelectorAll('#lista li')].find(li => li.innerText.includes(${JSON.stringify(clientName)})); return li ? li.innerText : null; })()`);
   check('Cliente aparece na lista com cidade e UF', row && /Campinas/.test(row) && /SP/.test(row), row);
-  check('Formulario limpo apos cadastro', (await evaluate('document.querySelector("#cliente-nome").value')) === '');
+  check('Formulario limpo apos cadastro', (await evaluate('document.querySelector("#cliente-nome").value + document.querySelector("#cliente-email").value')) === '');
   check('Mensagem de sucesso em regiao aria-live', await evaluate('(() => { const m = document.querySelector("#mensagem"); return m.getAttribute("aria-live") === "polite" && /cadastrado/i.test(m.innerText); })()'));
+  check('Sucesso mostra o login criado e o aviso da senha padrao', await evaluate(`(() => { const t = document.querySelector('#mensagem').innerText; return t.includes(${JSON.stringify(clientEmail)}) && t.includes('senha padrão'); })()`), await evaluate('document.querySelector("#mensagem").innerText'));
   await shot('clientes-desktop');
 
-  await submitClient(clientName.toUpperCase(), 'Campinas', 'SP');
+  await submitClient(`${clientName} outra`, 'Campinas', 'SP', clientEmail);
+  await until('/ja tem acesso/i.test(document.querySelector("#mensagem")?.innerText ?? "")', 'erro de e-mail ja usado');
+  check('E-mail ja usado mostra o 409 da API e nao cadastra', await evaluate(`document.querySelector('#mensagem').classList.contains('erro') && !document.querySelector('#lista').innerText.includes(${JSON.stringify(`${clientName} outra`)})`));
+
+  await submitClient(clientName.toUpperCase(), 'Campinas', 'SP', `qa.duplicado.${Date.now()}@cti.demo`);
   await until('/ja cadastrado|já cadastrado/i.test(document.querySelector("#mensagem")?.innerText ?? "")', 'erro de duplicado');
   check('Duplicado em caixa diferente mostra erro do servidor', await evaluate('document.querySelector("#mensagem").classList.contains("erro")'), await evaluate('document.querySelector("#mensagem").innerText'));
   check('Duplicado nao entra na lista', (await evaluate(`[...document.querySelectorAll('#lista li')].filter(li => li.innerText.toLowerCase().includes(${JSON.stringify(clientName.toLowerCase())})).length`)) === 1);
@@ -110,6 +121,14 @@ try {
   await until('document.querySelector("#acesso-negado") && !document.querySelector("#acesso-negado").hidden', 'acesso negado');
   check('Gestor ve acesso negado sem formulario', await evaluate('document.querySelector("#app-view").hidden && !!document.querySelector("#acesso-negado a[href=\\"/\\"]")'));
   await shot('clientes-negado');
+
+  await evaluate('document.querySelector("#sair").click()');
+  await until('!document.querySelector("#login-view").hidden', 'logout do gestor');
+  await cdp('Page.navigate', { url: base });
+  await until('!!document.querySelector("#login-form")', 'login da tela principal');
+  await evaluate(`(() => { document.querySelector('#login-email').value=${JSON.stringify(clientEmail)};document.querySelector('#login-password').value=${JSON.stringify(password)};document.querySelector('#login-form').requestSubmit(); })()`);
+  await until('!!document.querySelector("nav")', 'empresa nova entra na plataforma');
+  check('Empresa nova entra no espaco do cliente com a senha padrao', await evaluate(`location.hash === '#enviar-feedback' && document.querySelector('.space-label')?.textContent.trim() === 'Espaço cliente'`), await evaluate(`({hash: location.hash, space: document.querySelector('.space-label')?.textContent})`));
   check('Sem excecoes JS', errors.length === 0, errors);
 } catch (error) {
   console.error(error.message);

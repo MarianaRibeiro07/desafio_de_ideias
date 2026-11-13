@@ -15,6 +15,17 @@ const pending = new Map();
 let browser, socket, request = 0;
 let workflowTicket = null;
 const workflowSubject = `VPN QA navegador ${Date.now()}`;
+const qaAttendantEmail = `qa.atendente.${Date.now()}@cti.demo`;
+const qaSupervisorEmail = `qa.supervisor.${Date.now()}@cti.demo`;
+const userRow = email => `[...document.querySelectorAll('#users-list tbody tr')].find(r => r.textContent.includes(${JSON.stringify(email)}))`;
+async function toggleUser(email, id, action, expected) {
+  await evaluate(`document.querySelector('#users-list [data-action="${action}"][data-id="${id}"]').click()`);
+  await until(`(${userRow(email)})?.textContent.includes(${JSON.stringify(expected)})`, `${action} ${email}`);
+}
+async function createUser(name, email, teamId) {
+  await evaluate(`(() => { const f = document.querySelector('#user-form'); f.querySelector('#user_name').value = ${JSON.stringify(name)}; f.querySelector('#user_email').value = ${JSON.stringify(email)}; ${teamId === undefined ? '' : `f.querySelector('#team_id').value = ${JSON.stringify(String(teamId))};`} f.requestSubmit(); })()`);
+  await until(`document.querySelector('#toast').textContent.includes(${JSON.stringify(email)}) && !!(${userRow(email)})`, `conta criada ${email}`);
+}
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const visibleCols = `[...document.querySelectorAll('table')].map(t => [...t.querySelectorAll('thead th')].filter(th => th.offsetParent !== null && th.getBoundingClientRect().width > 0).length)`;
 function check(name, condition, details) {
@@ -319,6 +330,21 @@ try {
       await until(`!document.querySelector('dialog[open]')`, 'supervisor libera nova tentativa');
       const retry = (await api('GET', '/api/bootstrap')).body.data.tickets.find(t => t.id === workflowTicket);
       check('Nova tentativa supervisor preserva limite manual', retry.status === 'awaiting_feedback' && retry.manual_status_changes === 1 && retry.solution_attempt === 2);
+      check('Supervisor tem a aba Equipe no fim do menu', links.at(-1)?.href === '#equipe', links);
+      await evaluate(`location.hash='#equipe'`);
+      await until(`!!document.querySelector('#user-form') && !!document.querySelector('#users-list .data-table')`, 'aba Equipe do supervisor');
+      check('Equipe do supervisor: h1, formulario so com nome e e-mail e aviso da senha padrao', await evaluate(`document.querySelector('h1')?.textContent.includes('Equipe') && !!document.querySelector('#user_name') && document.querySelector('#user_email')?.type === 'email' && !document.querySelector('#user-form #team_id') && document.querySelector('#page-content').textContent.includes('senha padrão das contas de demonstração')`));
+      await createUser('Atendente QA Navegador', qaAttendantEmail);
+      check('Cadastro do atendente confirma a conta e a senha padrao', await evaluate(`document.querySelector('#toast').textContent === ${JSON.stringify(`Conta criada para ${qaAttendantEmail}. Entra com a senha padrão das contas de demonstração.`)}`), await evaluate(`document.querySelector('#toast').textContent`));
+      const newAttendant = (await api('GET', '/api/users')).body.data.find(u => u.email === qaAttendantEmail);
+      check('Atendente novo gravado ativo na equipe da supervisora', Number(newAttendant?.active) === 1, newAttendant);
+      check('Atendente novo aparece Ativo com botao Desativar', await evaluate(`(() => { const r = ${userRow(qaAttendantEmail)}; return Boolean(r) && r.textContent.includes('Ativo') && r.querySelector('[data-action="user-deactivate"]')?.textContent.trim() === 'Desativar'; })()`));
+      check('Lista da equipe nao oferece acao sobre a propria conta', await evaluate(`!document.querySelector('#users-list [data-id="${boot.body.data.user.id}"]')`));
+      await toggleUser(qaAttendantEmail, newAttendant.id, 'user-deactivate', 'Inativo');
+      check('Desativar atendente grava inativo e oferece Reativar', Number((await api('GET', '/api/users')).body.data.find(u => u.id === newAttendant.id)?.active) === 0 && await evaluate(`(${userRow(qaAttendantEmail)}).querySelector('[data-action="user-reactivate"]')?.textContent.trim() === 'Reativar'`));
+      await toggleUser(qaAttendantEmail, newAttendant.id, 'user-reactivate', 'Ativo');
+      check('Reativar atendente grava ativo de novo', Number((await api('GET', '/api/users')).body.data.find(u => u.id === newAttendant.id)?.active) === 1);
+      await shot('supervisor-equipe');
     }
     if (role === 'manager') {
       await evaluate(`location.hash='#visao-geral'`);
@@ -385,6 +411,23 @@ try {
       check('Gestor acessa relatorio de criticidade', await evaluate(`!!document.querySelector('[data-action="report-type"][data-type="criticality"]')`));
       check('Gestor: Relatorios herda o tema escuro e mantem tabelas com ate 4 colunas e sem rolagem horizontal', await evaluate(`!!document.querySelector('.theme-dash') && ${visibleCols}.every(n => n <= 4) && document.documentElement.scrollWidth <= innerWidth`));
       await shot('gestor-filtro-criticidade');
+      check('Gestor tem a aba Supervisores no fim do menu', links.at(-1)?.href === '#supervisores', links);
+      const supervisors = (await api('GET', '/api/users')).body.data;
+      const qaTeam = supervisors.find(s => Number(s.active) === 1)?.team_id;
+      await evaluate(`location.hash='#supervisores'`);
+      await until(`!!document.querySelector('#user-form #team_id') && !!document.querySelector('#users-list .data-table')`, 'aba Supervisores do gestor');
+      check('Supervisores do gestor: select com todas as equipes', await evaluate(`[...document.querySelectorAll('#team_id option')].filter(o => o.value).map(o => o.value).join('|') === ${JSON.stringify(boot.body.data.teams.map(t => String(t.id)).join('|'))}`), boot.body.data.teams);
+      check('Supervisores do gestor listam os supervisores da API', await evaluate(`document.querySelectorAll('#users-list tbody tr').length`) === supervisors.length);
+      await createUser('Supervisor QA Navegador', qaSupervisorEmail, qaTeam);
+      const newSupervisor = (await api('GET', '/api/users')).body.data.find(u => u.email === qaSupervisorEmail);
+      check('Gestor cria supervisor ativo na equipe escolhida', Number(newSupervisor?.active) === 1 && Number(newSupervisor.team_id) === Number(qaTeam), newSupervisor);
+      await toggleUser(qaSupervisorEmail, newSupervisor.id, 'user-deactivate', 'Inativo');
+      check('Gestor desativa o supervisor', Number((await api('GET', '/api/users')).body.data.find(u => u.id === newSupervisor.id)?.active) === 0);
+      await toggleUser(qaSupervisorEmail, newSupervisor.id, 'user-reactivate', 'Ativo');
+      check('Gestor reativa o supervisor', Number((await api('GET', '/api/users')).body.data.find(u => u.id === newSupervisor.id)?.active) === 1);
+      const usersTone = await evaluate(`(() => { const sum = el => getComputedStyle(el).color.match(/\\d+/g).slice(0, 3).map(Number).reduce((a, b) => a + b, 0); return { dark: !!document.querySelector('.theme-dash.dark'), cell: sum(document.querySelector('#users-list tbody td')), label: sum(document.querySelector('label[for="user_name"]')), input: sum(document.querySelector('#user_name')) }; })()`);
+      check('Supervisores legivel no tema escuro do gestor (texto claro)', usersTone.dark && usersTone.cell > 450 && usersTone.label > 450 && usersTone.input > 450, usersTone);
+      await shot('gestor-supervisores');
     }
     await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
     await pause(200);
@@ -429,6 +472,12 @@ try {
   await evaluate(`document.querySelector('#login-email').value='rafael@cti.demo';document.querySelector('#login-password').value='CtiDemo2026!';document.querySelector('#login-form').requestSubmit()`);
   await until(`!!document.querySelector('nav')`, 'login apos expiracao sem recarregar');
   check('Sessao expirada permite novo login sem recarregar', (await api('GET', '/api/bootstrap')).body.data.user.role === 'attendant');
+  await evaluate(`document.querySelector('[data-action="logout"]').click()`);
+  await until(`!!document.querySelector('#login-form')`, 'logout antes do atendente novo');
+  await evaluate(`document.querySelector('#login-email').value=${JSON.stringify(qaAttendantEmail)};document.querySelector('#login-password').value='CtiDemo2026!';document.querySelector('#login-form').requestSubmit()`);
+  await until(`!!document.querySelector('nav')`, 'login do atendente criado pela supervisora');
+  const qaAttendantUser = (await api('GET', '/api/bootstrap')).body.data.user;
+  check('Atendente criado pela supervisora entra com a senha padrao', qaAttendantUser.role === 'attendant' && qaAttendantUser.email === qaAttendantEmail, qaAttendantUser);
   check('Sem excecoes nem assets quebrados', errors.length === 0, errors);
 } catch (error) {
   errors.push({ type: 'qa', message: error.message });

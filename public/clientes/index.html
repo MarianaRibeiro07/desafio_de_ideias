@@ -66,6 +66,11 @@
               <select id="cliente-uf" name="state" required></select>
             </div>
           </div>
+          <div class="campo" style="margin-top:16px">
+            <label for="cliente-email">E-mail de acesso da empresa</label>
+            <input id="cliente-email" name="email" type="email" maxlength="254" autocomplete="off" aria-describedby="cliente-email-dica" required>
+            <small id="cliente-email-dica" class="apoio" style="margin:0">A empresa entra na plataforma com este e-mail e a senha padrão das contas de demonstração.</small>
+          </div>
           <div class="acoes">
             <button type="submit" id="cadastrar" class="botao">Cadastrar cliente</button>
           </div>

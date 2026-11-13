@@ -136,17 +136,18 @@ $('login-form').addEventListener('submit', async event => {
 $('cadastro-form').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget;
-  const body = { name: form.elements.name.value.trim(), city: form.elements.city.value.trim(), state: form.elements.state.value };
-  if (!body.name || !body.city || !body.state) { setMessage('Preencha o nome da empresa, a cidade e a UF.', true); return; }
+  const body = { name: form.elements.name.value.trim(), city: form.elements.city.value.trim(), state: form.elements.state.value, email: form.elements.email.value.trim() };
+  if (!body.name || !body.city || !body.state || !body.email) { setMessage('Preencha o nome da empresa, a cidade, a UF e o e-mail de acesso da empresa.', true); return; }
   $('cadastrar').disabled = true;
   try {
-    await api('/clients', { method: 'POST', body });
+    const created = await api('/clients', { method: 'POST', body });
     form.reset();
-    setMessage(`Cliente ${body.name} cadastrado com sucesso.`);
+    setMessage(`Cliente ${body.name} cadastrado com sucesso. Login criado: ${created.login?.email ?? body.email}. A empresa entra com esse e-mail e a senha padrão das contas de demonstração.`);
     await loadClients();
     $('cliente-nome').focus();
   } catch (error) {
     setMessage(error.message, true);
+    if ([400, 409].includes(error.status) && /e-mail/i.test(error.message)) $('cliente-email').focus();
   } finally {
     $('cadastrar').disabled = false;
   }

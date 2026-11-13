@@ -1,6 +1,6 @@
 const app = document.querySelector('#app');
 const dialog = document.querySelector('#detail-dialog');
-const state = { user: null, csrf: '', data: null, report: null, route: '', params: new URLSearchParams(), filters: {}, decision: null, formMode: 'text', audio: null, recording: false, modalFeedbackId: null, caseResults: [], selectedCategory: null, renderId: 0 };
+const state = { user: null, csrf: '', data: null, report: null, route: '', params: new URLSearchParams(), filters: {}, decision: null, formMode: 'text', audio: null, recording: false, modalFeedbackId: null, caseResults: [], selectedCategory: null, renderId: 0, users: [] };
 const roleNames = { attendant: 'Atendente', supervisor: 'Supervisor', manager: 'Gestor', client: 'Cliente' };
 const statusNames = { active: 'Em atendimento', awaiting_feedback: 'Aguardando cliente', resolved: 'Resolvido', closed_no_response: 'Encerrado sem retorno' };
 const sentimentNames = { positive: 'Positivo', neutral: 'Neutro', negative: 'Negativo', pending: 'Pendente' };
@@ -8,8 +8,8 @@ const criticalityNames = { critical: 'Crítico', regular: 'Regular' };
 const modeNames = { quick: 'Avaliação rápida', text: 'Texto', audio: 'Áudio gravado' };
 const routes = {
   attendant: [['atendimentos', 'Meus atendimentos'], ['registrar', 'Registrar atendimento'], ['clientes', 'Clientes'], ['feedbacks', 'Feedbacks dos meus atendimentos'], ['relatorio', 'Meu relatório']],
-  supervisor: [['dashboard', 'Dashboard da equipe'], ['atendimentos', 'Atendimentos da equipe'], ['feedbacks', 'Feedbacks da equipe'], ['criticos', 'Casos críticos']],
-  manager: [['visao-geral', 'Visão geral'], ['indicadores', 'Indicadores e tendências'], ['equipes', 'Comparação entre equipes'], ['relatorios', 'Relatórios']],
+  supervisor: [['dashboard', 'Dashboard da equipe'], ['atendimentos', 'Atendimentos da equipe'], ['feedbacks', 'Feedbacks da equipe'], ['criticos', 'Casos críticos'], ['equipe', 'Equipe']],
+  manager: [['visao-geral', 'Visão geral'], ['indicadores', 'Indicadores e tendências'], ['equipes', 'Comparação entre equipes'], ['relatorios', 'Relatórios'], ['supervisores', 'Supervisores']],
   client: [['enviar-feedback', 'Enviar feedback'], ['feedbacks', 'Meus feedbacks']]
 };
 let caseTimer;
@@ -29,7 +29,7 @@ function initial() { return esc(state.user?.name?.[0] || 'C'); }
 function icon(file, size = 18) { return `<span class="icon" aria-hidden="true"><img src="/assets/figma/${file}.svg" width="${size}" height="${size}" alt=""></span>`; }
 function navigationIcon(path) {
   const active = state.route === path;
-  const files = { atendimentos: active ? '74d5d' : '3beb0', registrar: active ? '218d5' : '5bf39', clientes: active ? '5b8fb' : '82039', feedbacks: active ? '5dc6e' : '3928a', relatorio: active ? '75e27' : '34ec9', dashboard: 'fe998', criticos: 'a8049', 'visao-geral': active ? '3b9ea' : 'fe998', indicadores: active ? '2ccfc' : '164c8', equipes: active ? '5b8fb' : '82039', relatorios: active ? '75e27' : '34ec9', 'enviar-feedback': active ? '45599' : '35636' };
+  const files = { atendimentos: active ? '74d5d' : '3beb0', registrar: active ? '218d5' : '5bf39', clientes: active ? '5b8fb' : '82039', feedbacks: active ? '5dc6e' : '3928a', relatorio: active ? '75e27' : '34ec9', dashboard: 'fe998', criticos: 'a8049', 'visao-geral': active ? '3b9ea' : 'fe998', indicadores: active ? '2ccfc' : '164c8', equipes: active ? '5b8fb' : '82039', relatorios: active ? '75e27' : '34ec9', equipe: active ? '5b8fb' : '82039', supervisores: active ? '5b8fb' : '82039', 'enviar-feedback': active ? '45599' : '35636' };
   return files[path] ? icon(files[path]) : '';
 }
 function date(value, time = false) { if (!value) return 'Não informado'; const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00` : value); return Number.isNaN(d.getTime()) ? esc(value) : d.toLocaleString('pt-BR', time ? { dateStyle: 'short', timeStyle: 'short' } : { dateStyle: 'short' }); }
@@ -143,6 +143,8 @@ async function render() {
   else if (state.route === 'feedbacks') shell(feedbacksPage());
   else if (state.route === 'enviar-feedback') shell(feedbackFormPage());
   else if (state.route === 'criticos') shell(criticalPage());
+  else if (state.route === 'equipe') { shell(usersPage()); await loadUsers(id); }
+  else if (state.route === 'supervisores') { shell(usersPage()); await loadUsers(id); }
   else { shell(`<div class="card loading-card"><span class="spinner"></span>Calculando os indicadores do banco...</div>`); try { state.report = await api(`/reports?${new URLSearchParams(state.filters)}`); if (id !== state.renderId) return; showReport(); } catch (error) { if (id === state.renderId) document.querySelector('#page-content').innerHTML = `<div class="inline-error" role="alert">${esc(error.message)}</div>`; } }
 }
 function ticketFeedback(ticket) { return state.data.feedbacks.find(f => Number(f.ticket_id) === Number(ticket.id) && (f.attempt === undefined || ticket.solution_attempt === undefined || Number(f.attempt) === Number(ticket.solution_attempt))); }
@@ -324,6 +326,20 @@ function feedbackTable(feedbacks) {
 }
 function feedbacksPage() { const feedbacks = filteredFeedbacks(); const supervisor = state.user.role === 'supervisor'; return `${state.user.role !== 'client' ? filtersForm(true) : ''}<div class="section-head"><div><h2>Cada feedback conta uma história</h2><p>${feedbacks.length} registros no seu escopo de acesso</p></div>${state.user.role === 'client' ? link(`Enviar feedback ${icon('9b528', 15)}`, 'enviar-feedback') : ''}</div>${supervisor ? '<div class="banner compact"><p>Estes são os feedbacks dos atendimentos da sua equipe. O sentimento vem do modelo local ou da revisão humana, e a origem mostra se o relato chegou por texto, áudio ou nota.</p></div>' : ''}${feedbackTable(feedbacks)}`; }
 function criticalPage() { const items = filteredFeedbacks().filter(f => f.criticality === 'critical'); return `${filtersForm(true)}<div class="banner banner-warning compact">${icon('20913')}<p>Sinais automáticos precisam de avaliação humana. Sentimento negativo, por si só, não determina alta criticidade. Revise cada caso antes de confirmar a classificação.</p></div><div class="section-head"><div><h2>Um olhar atento faz a diferença</h2><p>${items.length} registros no seu escopo de acesso</p></div></div>${feedbackTable(items)}`; }
+function usersPage() {
+  const manager = state.user.role === 'manager';
+  return `<section class="card form-card"><h2>${manager ? 'Novo supervisor' : 'Novo atendente'}</h2><p>${manager ? 'Escolha a equipe que ele vai supervisionar.' : 'O atendente entra na sua equipe.'} A conta entra com a senha padrão das contas de demonstração.</p><form id="user-form"><div class="form-grid">${input('user_name', 'Nome', 'text', '', 'required minlength="3" maxlength="120" autocomplete="off"')}${input('user_email', 'E-mail', 'email', '', 'required maxlength="254" autocomplete="off"')}${manager ? select('team_id', 'Equipe', [['', 'Selecione a equipe'], ...state.data.teams.map(t => [t.id, t.name])], '', 'required') : ''}</div><div class="form-actions"><small>Desativar nunca apaga a conta: o acesso é bloqueado na hora e pode ser reativado.</small><button type="submit" class="btn btn-primary">Criar conta</button></div></form></section><div id="users-list"><div class="card loading-card"><span class="spinner"></span>Carregando as contas...</div></div>`;
+}
+function usersTable() {
+  const manager = state.user.role === 'manager';
+  const teamName = id => state.data.teams.find(t => Number(t.id) === Number(id))?.name || 'Equipe não informada';
+  const cols = [{ h: 'Nome', cls: 'col-main' }, { h: 'E-mail' }, { h: 'Situação' }, { h: 'Ação', cls: 'action-col' }];
+  const rows = state.users.map(u => { const active = Number(u.active) === 1; return [`<strong>${esc(u.name)}</strong>${manager ? `<small>${esc(teamName(u.team_id))}</small>` : ''}`, esc(u.email), badge(active ? 'positive' : 'regular', { positive: 'Ativo', regular: 'Inativo' }), Number(u.id) === Number(state.user.id) ? '<small>Sua conta</small>' : btn(active ? 'Desativar' : 'Reativar', active ? 'user-deactivate' : 'user-reactivate', 'btn-small', `data-id="${num(u.id)}"`)]; });
+  return `<div class="section-head"><div><h2>${manager ? 'Supervisores das equipes' : 'Atendentes da sua equipe'}</h2><p>${state.users.filter(u => Number(u.active) === 1).length} ativos de ${state.users.length} contas</p></div></div><div class="card table-wrap">${rows.length ? dtable(cols, rows) : empty('Nenhuma conta por aqui.', 'Crie a primeira conta pelo formulário acima.')}</div>`;
+}
+async function loadUsers(id = state.renderId) {
+  try { const users = await api('/users'); if (id !== state.renderId) return; state.users = users; document.querySelector('#users-list').innerHTML = usersTable(); } catch (error) { if (id === state.renderId) document.querySelector('#users-list').innerHTML = `<div class="inline-error" role="alert">${esc(error.message)}</div>`; }
+}
 function decisionButtons(ticket) {
   return `<div class="decision-row" role="group" aria-label="Sua decisão sobre o atendimento ${esc(ticket.protocol)}">${btn('Resolveu, pode encerrar', 'decide', 'btn-primary', `data-id="${ticket.id}" data-resolved="1"`)}${btn('Ainda preciso de ajuda', 'decide', '', `data-id="${ticket.id}" data-resolved="0"`)}</div>`;
 }
@@ -967,6 +983,7 @@ async function submitForm(form) {
     if (form.id === 'solution-form') { await api(`/tickets/${form.dataset.id}/solution`, { method: 'POST', body: { solution: data.solution } }); await refreshData(); toast('Solução enviada. Agora o sistema aguarda a confirmação do cliente.'); await render(); return; }
     if (form.id === 'reply-form') { await api(`/tickets/${form.dataset.id}/reply`, { method: 'POST', body: { message: data.message } }); await refreshData(); toast('Resposta registrada e disponível ao cliente.'); await render(); return; }
     if (form.id === 'filters-form') { if (data.from && data.to && data.from > data.to) throw new Error('A data inicial precisa ser anterior ou igual à data final.'); state.filters = { ...Object.fromEntries(Object.entries(data).filter(([, v]) => v)), ...(state.filters.type ? { type: state.filters.type } : {}) }; if (['feedbacks', 'criticos'].includes(state.route)) shell(state.route === 'criticos' ? criticalPage() : feedbacksPage()); else { state.report = await api(`/reports?${new URLSearchParams(state.filters)}`); showReport(); } toast('Filtros aplicados.'); return; }
+    if (form.id === 'user-form') { const user = await api('/users', { method: 'POST', body: { name: data.user_name.trim(), email: data.user_email.trim(), ...(state.user.role === 'manager' ? { team_id: num(data.team_id) } : {}) } }); form.reset(); form.querySelector('.inline-error')?.remove(); toast(`Conta criada para ${user.email}. Entra com a senha padrão das contas de demonstração.`); await loadUsers(); return; }
     if (form.id === 'review-form') { const id = num(form.dataset.id); await api(`/feedbacks/${id}/review`, { method: 'POST', body: { sentiment: data.review_sentiment, criticality: data.review_criticality, justification: data.justification, action: data.action } }); await refreshData(); toast('Revisão salva no histórico.'); await openFeedback(id); return; }
     if (form.id === 'retry-form') { await api(`/tickets/${form.dataset.id}/retry`, { method: 'POST', body: { solution: data.retry_solution, justification: data.retry_justification } }); await refreshData(); closeDialog(); toast('Nova tentativa autorizada. O cliente já pode confirmar a nova solução.'); await render(); return; }
     if (form.id === 'feedback-form') {
@@ -1003,6 +1020,7 @@ document.addEventListener('click', async event => {
     else if (action === 'feedback-detail') await openFeedback(target.dataset.id);
     else if (action === 'ticket-detail') await openTicket(target.dataset.id);
     else if (action === 'analyze-feedback') { target.disabled = true; try { await queueHostedAnalysis(num(target.dataset.id)); } finally { if (target.isConnected) target.disabled = false; } }
+    else if (action === 'user-deactivate' || action === 'user-reactivate') { target.disabled = true; try { const user = await api(`/users/${num(target.dataset.id)}/${action === 'user-deactivate' ? 'deactivate' : 'reactivate'}`, { method: 'POST' }); state.users = state.users.map(u => Number(u.id) === Number(user.id) ? user : u); document.querySelector('#users-list').innerHTML = usersTable(); toast(action === 'user-deactivate' ? `Acesso de ${user.name} desativado. A conta foi preservada.` : `Acesso de ${user.name} reativado.`); } finally { if (target.isConnected) target.disabled = false; } }
     else if (action === 'retry-analysis') { target.disabled = true; try { await api(`/feedbacks/${num(target.dataset.id)}/retry-analysis`, { method: 'POST' }); await refreshData(); updateAnalysisViews(); toast('Análise adicionada novamente à fila.'); queueHostedAnalysis(num(target.dataset.id)); } finally { target.disabled = false; } }
     else if (action === 'apply-case') { const c = state.caseResults.find(c => Number(c.id) === Number(target.dataset.id)); if (c) { document.querySelector('#subject').value = c.subject; state.selectedCategory = c.category_id; document.querySelector('#subject-suggestions').hidden = true; document.querySelector('#subject').setAttribute('aria-expanded', 'false'); const solution = document.querySelector('#solution'); if (solution && !solution.value) solution.value = c.solution; toast('Assunto preenchido a partir do case de resolução.'); } }
     else if (action === 'feedback-mode') changeMode(target.dataset.mode);
