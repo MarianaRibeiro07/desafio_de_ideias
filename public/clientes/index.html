@@ -22,9 +22,10 @@
   </header>
 
   <main id="principal" class="pagina">
-    <p id="carregando" class="vazio" role="status">Carregando...</p>
+    <div id="carregando" class="cartao estado" role="status"><span class="spinner" aria-hidden="true"></span>Carregando...</div>
 
     <section id="login-view" class="cartao cartao-estreito" aria-labelledby="login-titulo" hidden>
+      <p class="sobretitulo">Clientes</p>
       <h1 id="login-titulo">Cadastro de clientes</h1>
       <p class="apoio">Entre com sua conta de atendente ou supervisor.</p>
       <form id="login-form" novalidate>
@@ -36,59 +37,70 @@
           <label for="login-password">Senha</label>
           <input id="login-password" name="password" type="password" autocomplete="current-password" required>
         </div>
-        <button type="submit" class="botao">Entrar</button>
+        <button type="submit" class="botao botao-cheio">Entrar</button>
       </form>
     </section>
 
     <section id="acesso-negado" class="cartao cartao-estreito" aria-labelledby="negado-titulo" hidden>
+      <p class="sobretitulo">Clientes</p>
       <h1 id="negado-titulo">Acesso negado</h1>
       <p class="apoio">Esta tela de cadastro é exclusiva de atendentes e supervisores. Seu perfil não tem permissão para cadastrar clientes.</p>
       <a class="botao" href="/">Voltar ao sistema geral</a>
     </section>
 
     <div id="app-view" hidden>
-      <h1 class="titulo-pagina">Cadastro de clientes</h1>
+      <div class="cabecalho-pagina">
+        <p class="sobretitulo">Clientes</p>
+        <h1 class="titulo-pagina">Cadastro de clientes</h1>
+        <p class="apoio">Cadastre as empresas atendidas e mantenha os dados de acesso de cada uma em dia.</p>
+      </div>
 
-      <section class="cartao" aria-labelledby="cadastro-titulo">
+      <section class="cartao cartao-formulario" aria-labelledby="cadastro-titulo">
         <h2 id="cadastro-titulo">Novo cliente</h2>
+        <p id="cadastro-apoio" class="apoio">O cadastro cria o acesso da empresa à plataforma.</p>
         <form id="cadastro-form" novalidate>
           <div class="grade">
-            <div class="campo campo-nome">
+            <div class="campo campo-largo">
               <label for="cliente-nome">Nome da empresa</label>
               <input id="cliente-nome" name="name" type="text" minlength="3" maxlength="120" autocomplete="organization" required>
             </div>
-            <div class="campo">
-              <label for="cliente-cidade">Cidade</label>
-              <input id="cliente-cidade" name="city" type="text" maxlength="80" autocomplete="address-level2" required>
+            <div class="campo campo-largo">
+              <label for="cliente-email">E-mail de acesso da empresa</label>
+              <input id="cliente-email" name="email" type="email" maxlength="254" autocomplete="off" aria-describedby="cliente-email-dica" required>
+              <small id="cliente-email-dica" class="dica">A empresa entra na plataforma com este e-mail e a senha padrão das contas de demonstração.</small>
             </div>
-            <div class="campo campo-uf">
-              <label for="cliente-uf">UF</label>
-              <select id="cliente-uf" name="state" required></select>
+            <div class="linha-local campo-largo">
+              <div class="campo">
+                <label for="cliente-cidade">Cidade</label>
+                <input id="cliente-cidade" name="city" type="text" maxlength="80" autocomplete="address-level2" required>
+              </div>
+              <div class="campo campo-uf">
+                <label for="cliente-uf">UF</label>
+                <select id="cliente-uf" name="state" required></select>
+              </div>
             </div>
-          </div>
-          <div class="campo" style="margin-top:16px">
-            <label for="cliente-email">E-mail de acesso da empresa</label>
-            <input id="cliente-email" name="email" type="email" maxlength="254" autocomplete="off" aria-describedby="cliente-email-dica" required>
-            <small id="cliente-email-dica" class="apoio" style="margin:0">A empresa entra na plataforma com este e-mail e a senha padrão das contas de demonstração.</small>
           </div>
           <div class="acoes">
-            <button type="submit" id="cadastrar" class="botao">Cadastrar cliente</button>
+            <button type="button" id="cancelar-edicao" class="botao botao-claro" hidden>Cancelar</button>
+            <button type="submit" id="cadastrar" class="botao botao-cheio">Cadastrar cliente</button>
           </div>
         </form>
         <p id="mensagem" class="mensagem" aria-live="polite" aria-atomic="true"></p>
       </section>
 
-      <section class="cartao" aria-labelledby="lista-titulo">
+      <section class="secao-lista" aria-labelledby="lista-titulo">
         <div class="lista-cabecalho">
-          <h2 id="lista-titulo">Clientes cadastrados</h2>
-          <p id="contagem" class="apoio" aria-live="polite"></p>
-        </div>
-        <div class="campo campo-busca">
-          <label for="busca">Buscar por nome ou cidade</label>
-          <input id="busca" type="search" autocomplete="off">
+          <div>
+            <h2 id="lista-titulo">Clientes cadastrados</h2>
+            <p id="contagem" class="apoio" aria-live="polite"></p>
+          </div>
+          <div class="campo campo-busca">
+            <label for="busca">Buscar por nome ou cidade</label>
+            <input id="busca" type="search" autocomplete="off">
+          </div>
         </div>
         <ul id="lista" class="lista"></ul>
-        <p id="lista-vazia" class="vazio" hidden></p>
+        <div id="lista-estado" class="cartao estado" hidden></div>
       </section>
     </div>
   </main>

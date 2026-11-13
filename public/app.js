@@ -328,14 +328,36 @@ function feedbacksPage() { const feedbacks = filteredFeedbacks(); const supervis
 function criticalPage() { const items = filteredFeedbacks().filter(f => f.criticality === 'critical'); return `${filtersForm(true)}<div class="banner banner-warning compact">${icon('20913')}<p>Sinais automáticos precisam de avaliação humana. Sentimento negativo, por si só, não determina alta criticidade. Revise cada caso antes de confirmar a classificação.</p></div><div class="section-head"><div><h2>Um olhar atento faz a diferença</h2><p>${items.length} registros no seu escopo de acesso</p></div></div>${feedbackTable(items)}`; }
 function usersPage() {
   const manager = state.user.role === 'manager';
-  return `<section class="card form-card"><h2>${manager ? 'Novo supervisor' : 'Novo atendente'}</h2><p>${manager ? 'Escolha a equipe que ele vai supervisionar.' : 'O atendente entra na sua equipe.'} A conta entra com a senha padrão das contas de demonstração.</p><form id="user-form"><div class="form-grid">${input('user_name', 'Nome', 'text', '', 'required minlength="3" maxlength="120" autocomplete="off"')}${input('user_email', 'E-mail', 'email', '', 'required maxlength="254" autocomplete="off"')}${manager ? select('team_id', 'Equipe', [['', 'Selecione a equipe'], ...state.data.teams.map(t => [t.id, t.name])], '', 'required') : ''}</div><div class="form-actions"><small>Desativar nunca apaga a conta: o acesso é bloqueado na hora e pode ser reativado.</small><button type="submit" class="btn btn-primary">Criar conta</button></div></form></section><div id="users-list"><div class="card loading-card"><span class="spinner"></span>Carregando as contas...</div></div>`;
+  return `<section class="card form-card"><h2>${manager ? 'Novo supervisor' : 'Novo atendente'}</h2><p>${manager ? 'Escolha a equipe que ele vai supervisionar.' : 'O atendente entra na sua equipe.'} A conta entra com a senha padrão das contas de demonstração.</p><form id="user-form"><div class="form-grid">${input('user_name', 'Nome', 'text', '', 'required minlength="3" maxlength="120" autocomplete="off"')}${input('user_email', 'E-mail', 'email', '', 'required maxlength="254" autocomplete="off"')}${manager ? select('team_id', 'Equipe', [['', 'Selecione a equipe'], ...state.data.teams.map(t => [t.id, t.name])], '', 'required') : ''}</div><div class="form-actions"><small>Desativar nunca apaga a conta: o acesso é bloqueado na hora e pode ser reativado.</small><div class="button-row">${btn('Cancelar', 'user-edit-cancel', '', 'hidden')}<button type="submit" class="btn btn-primary">Criar conta</button></div></div></form></section><div id="users-list"><div class="card loading-card"><span class="spinner"></span>Carregando as contas...</div></div>`;
 }
 function usersTable() {
   const manager = state.user.role === 'manager';
   const teamName = id => state.data.teams.find(t => Number(t.id) === Number(id))?.name || 'Equipe não informada';
   const cols = [{ h: 'Nome', cls: 'col-main' }, { h: 'E-mail' }, { h: 'Situação' }, { h: 'Ação', cls: 'action-col' }];
-  const rows = state.users.map(u => { const active = Number(u.active) === 1; return [`<strong>${esc(u.name)}</strong>${manager ? `<small>${esc(teamName(u.team_id))}</small>` : ''}`, esc(u.email), badge(active ? 'positive' : 'regular', { positive: 'Ativo', regular: 'Inativo' }), Number(u.id) === Number(state.user.id) ? '<small>Sua conta</small>' : btn(active ? 'Desativar' : 'Reativar', active ? 'user-deactivate' : 'user-reactivate', 'btn-small', `data-id="${num(u.id)}"`)]; });
+  const rows = state.users.map(u => { const active = Number(u.active) === 1; return [`<strong>${esc(u.name)}</strong>${manager ? `<small>${esc(teamName(u.team_id))}</small>` : ''}`, esc(u.email), badge(active ? 'positive' : 'regular', { positive: 'Ativo', regular: 'Inativo' }), Number(u.id) === Number(state.user.id) ? '<small>Sua conta</small>' : `<div class="button-row">${btn('Editar', 'user-edit', 'btn-small', `data-id="${num(u.id)}"`)}${btn(active ? 'Desativar' : 'Reativar', active ? 'user-deactivate' : 'user-reactivate', 'btn-small', `data-id="${num(u.id)}"`)}${btn(u.has_history ? 'Arquivar' : 'Excluir', 'user-remove', 'btn-small btn-danger', `data-id="${num(u.id)}" data-mode="${u.has_history ? 'archive' : 'delete'}"`)}</div>`]; });
   return `<div class="section-head"><div><h2>${manager ? 'Supervisores das equipes' : 'Atendentes da sua equipe'}</h2><p>${state.users.filter(u => Number(u.active) === 1).length} ativos de ${state.users.length} contas</p></div></div><div class="card table-wrap">${rows.length ? dtable(cols, rows) : empty('Nenhuma conta por aqui.', 'Crie a primeira conta pelo formulário acima.')}</div>`;
+}
+function userFormMode(user = null) {
+  const form = document.querySelector('#user-form'); if (!form) return;
+  const manager = state.user.role === 'manager';
+  form.closest('.form-card').querySelector('h2').textContent = user ? (manager ? 'Editar supervisor' : 'Editar atendente') : (manager ? 'Novo supervisor' : 'Novo atendente');
+  if (user) form.dataset.id = String(num(user.id)); else delete form.dataset.id;
+  form.querySelector('#user_name').value = user ? user.name : '';
+  form.querySelector('#user_email').value = user ? user.email : '';
+  if (manager) form.querySelector('#team_id').value = user ? String(user.team_id ?? '') : '';
+  form.querySelector('button[type="submit"]').textContent = user ? 'Salvar alterações' : 'Criar conta';
+  form.querySelector('[data-action="user-edit-cancel"]').hidden = !user;
+  form.querySelector('.inline-error')?.remove();
+  if (user) { form.querySelector('#user_name').focus(); form.scrollIntoView({ block: 'nearest' }); }
+}
+// Confirmacao em dois cliques no mesmo botao: confirm() do navegador trava os testes automatizados.
+const confirmTimers = new WeakMap();
+function armConfirm(button, label, original) {
+  if (button.dataset.confirm === '1') return false;
+  button.dataset.confirm = '1'; button.textContent = label;
+  clearTimeout(confirmTimers.get(button));
+  confirmTimers.set(button, setTimeout(() => { delete button.dataset.confirm; button.textContent = original; }, 5000));
+  return true;
 }
 async function loadUsers(id = state.renderId) {
   try { const users = await api('/users'); if (id !== state.renderId) return; state.users = users; document.querySelector('#users-list').innerHTML = usersTable(); } catch (error) { if (id === state.renderId) document.querySelector('#users-list').innerHTML = `<div class="inline-error" role="alert">${esc(error.message)}</div>`; }
@@ -983,6 +1005,7 @@ async function submitForm(form) {
     if (form.id === 'solution-form') { await api(`/tickets/${form.dataset.id}/solution`, { method: 'POST', body: { solution: data.solution } }); await refreshData(); toast('Solução enviada. Agora o sistema aguarda a confirmação do cliente.'); await render(); return; }
     if (form.id === 'reply-form') { await api(`/tickets/${form.dataset.id}/reply`, { method: 'POST', body: { message: data.message } }); await refreshData(); toast('Resposta registrada e disponível ao cliente.'); await render(); return; }
     if (form.id === 'filters-form') { if (data.from && data.to && data.from > data.to) throw new Error('A data inicial precisa ser anterior ou igual à data final.'); state.filters = { ...Object.fromEntries(Object.entries(data).filter(([, v]) => v)), ...(state.filters.type ? { type: state.filters.type } : {}) }; if (['feedbacks', 'criticos'].includes(state.route)) shell(state.route === 'criticos' ? criticalPage() : feedbacksPage()); else { state.report = await api(`/reports?${new URLSearchParams(state.filters)}`); showReport(); } toast('Filtros aplicados.'); return; }
+    if (form.id === 'user-form' && form.dataset.id) { const user = await api(`/users/${num(form.dataset.id)}`, { method: 'PATCH', body: { name: data.user_name.trim(), email: data.user_email.trim(), ...(state.user.role === 'manager' ? { team_id: num(data.team_id) } : {}) } }); userFormMode(); toast(`Dados de ${user.name} atualizados.`); await loadUsers(); return; }
     if (form.id === 'user-form') { const user = await api('/users', { method: 'POST', body: { name: data.user_name.trim(), email: data.user_email.trim(), ...(state.user.role === 'manager' ? { team_id: num(data.team_id) } : {}) } }); form.reset(); form.querySelector('.inline-error')?.remove(); toast(`Conta criada para ${user.email}. Entra com a senha padrão das contas de demonstração.`); await loadUsers(); return; }
     if (form.id === 'review-form') { const id = num(form.dataset.id); await api(`/feedbacks/${id}/review`, { method: 'POST', body: { sentiment: data.review_sentiment, criticality: data.review_criticality, justification: data.justification, action: data.action } }); await refreshData(); toast('Revisão salva no histórico.'); await openFeedback(id); return; }
     if (form.id === 'retry-form') { await api(`/tickets/${form.dataset.id}/retry`, { method: 'POST', body: { solution: data.retry_solution, justification: data.retry_justification } }); await refreshData(); closeDialog(); toast('Nova tentativa autorizada. O cliente já pode confirmar a nova solução.'); await render(); return; }
@@ -1020,7 +1043,22 @@ document.addEventListener('click', async event => {
     else if (action === 'feedback-detail') await openFeedback(target.dataset.id);
     else if (action === 'ticket-detail') await openTicket(target.dataset.id);
     else if (action === 'analyze-feedback') { target.disabled = true; try { await queueHostedAnalysis(num(target.dataset.id)); } finally { if (target.isConnected) target.disabled = false; } }
-    else if (action === 'user-deactivate' || action === 'user-reactivate') { target.disabled = true; try { const user = await api(`/users/${num(target.dataset.id)}/${action === 'user-deactivate' ? 'deactivate' : 'reactivate'}`, { method: 'POST' }); state.users = state.users.map(u => Number(u.id) === Number(user.id) ? user : u); document.querySelector('#users-list').innerHTML = usersTable(); toast(action === 'user-deactivate' ? `Acesso de ${user.name} desativado. A conta foi preservada.` : `Acesso de ${user.name} reativado.`); } finally { if (target.isConnected) target.disabled = false; } }
+    else if (action === 'user-deactivate' || action === 'user-reactivate') { target.disabled = true; try { const user = await api(`/users/${num(target.dataset.id)}/${action === 'user-deactivate' ? 'deactivate' : 'reactivate'}`, { method: 'POST' }); state.users = state.users.map(u => Number(u.id) === Number(user.id) ? { ...u, ...user } : u); document.querySelector('#users-list').innerHTML = usersTable(); toast(action === 'user-deactivate' ? `Acesso de ${user.name} desativado. A conta foi preservada.` : `Acesso de ${user.name} reativado.`); } finally { if (target.isConnected) target.disabled = false; } }
+    else if (action === 'user-edit') { const user = state.users.find(u => Number(u.id) === num(target.dataset.id)); if (user) userFormMode(user); }
+    else if (action === 'user-edit-cancel') userFormMode();
+    else if (action === 'user-remove') {
+      const archive = target.dataset.mode === 'archive'; const original = archive ? 'Arquivar' : 'Excluir';
+      if (armConfirm(target, archive ? 'Confirmar arquivamento' : 'Confirmar exclusão', original)) return;
+      clearTimeout(confirmTimers.get(target)); target.disabled = true;
+      const id = num(target.dataset.id); const user = state.users.find(u => Number(u.id) === id); const form = document.querySelector('#user-form');
+      try {
+        await api(archive ? `/users/${id}/archive` : `/users/${id}`, { method: archive ? 'POST' : 'DELETE' });
+        if (form?.dataset.id === String(id)) userFormMode(); else form?.querySelector('.inline-error')?.remove();
+        toast(archive ? `Conta de ${user?.name ?? 'usuário'} arquivada. O histórico dos atendimentos foi preservado.` : `Conta de ${user?.name ?? 'usuário'} excluída.`);
+        await loadUsers();
+      } catch (error) { delete target.dataset.confirm; target.textContent = original; if (form) formError(form, error); else throw error; }
+      finally { if (target.isConnected) target.disabled = false; }
+    }
     else if (action === 'retry-analysis') { target.disabled = true; try { await api(`/feedbacks/${num(target.dataset.id)}/retry-analysis`, { method: 'POST' }); await refreshData(); updateAnalysisViews(); toast('Análise adicionada novamente à fila.'); queueHostedAnalysis(num(target.dataset.id)); } finally { target.disabled = false; } }
     else if (action === 'apply-case') { const c = state.caseResults.find(c => Number(c.id) === Number(target.dataset.id)); if (c) { document.querySelector('#subject').value = c.subject; state.selectedCategory = c.category_id; document.querySelector('#subject-suggestions').hidden = true; document.querySelector('#subject').setAttribute('aria-expanded', 'false'); const solution = document.querySelector('#solution'); if (solution && !solution.value) solution.value = c.solution; toast('Assunto preenchido a partir do case de resolução.'); } }
     else if (action === 'feedback-mode') changeMode(target.dataset.mode);

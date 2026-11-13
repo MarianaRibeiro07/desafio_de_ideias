@@ -58,6 +58,19 @@ async function shot(name, width = 1440) {
   const value = await cdp('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
   await writeFile(path.join(output, `${name}-${width}.png`), Buffer.from(value.data, 'base64'));
 }
+// Sessao propria no Node, com cookie e CSRF separados da aba do navegador.
+async function nodeRequest(email, method, route, body) {
+  let cookie = '';
+  const call = async (verb, path, payload, token) => {
+    const response = await fetch(base + path, { method: verb, headers: { Cookie: cookie, ...(token ? { 'X-CSRF-Token': token } : {}), ...(payload ? { 'Content-Type': 'application/json' } : {}) }, body: payload ? JSON.stringify(payload) : undefined });
+    const set = response.headers.getSetCookie().find(value => value.startsWith('cti_session='));
+    if (set) cookie = set.split(';')[0];
+    return { status: response.status, body: await response.json().catch(() => null) };
+  };
+  const session = await call('GET', '/api/session');
+  const login = await call('POST', '/api/login', { email, password: 'CtiDemo2026!' }, session.body?.data?.csrf_token);
+  return call(method, route, body, login.body?.data?.csrf_token);
+}
 async function api(method, route, body) {
   return evaluate(`(async () => {
     const session = await (await fetch('/api/session')).json();
@@ -344,6 +357,45 @@ try {
       check('Desativar atendente grava inativo e oferece Reativar', Number((await api('GET', '/api/users')).body.data.find(u => u.id === newAttendant.id)?.active) === 0 && await evaluate(`(${userRow(qaAttendantEmail)}).querySelector('[data-action="user-reactivate"]')?.textContent.trim() === 'Reativar'`));
       await toggleUser(qaAttendantEmail, newAttendant.id, 'user-reactivate', 'Ativo');
       check('Reativar atendente grava ativo de novo', Number((await api('GET', '/api/users')).body.data.find(u => u.id === newAttendant.id)?.active) === 1);
+      const userForm = `document.querySelector('#user-form')`;
+      await evaluate(`(${userRow(qaAttendantEmail)}).querySelector('[data-action="user-edit"]').click()`);
+      check('Editar carrega nome e e-mail no formulario de cima e troca titulo e botao', await evaluate(`(() => { const f = ${userForm}; return f.closest('.form-card').querySelector('h2').textContent === 'Editar atendente' && f.querySelector('#user_name').value === 'Atendente QA Navegador' && f.querySelector('#user_email').value === ${JSON.stringify(qaAttendantEmail)} && f.querySelector('button[type="submit"]').textContent === 'Salvar alterações' && !f.querySelector('[data-action="user-edit-cancel"]').hidden; })()`));
+      await shot('supervisor-equipe-edicao');
+      await evaluate(`document.querySelector('[data-action="user-edit-cancel"]').click()`);
+      check('Cancelar volta ao modo de criacao com o formulario limpo', await evaluate(`(() => { const f = ${userForm}; return f.closest('.form-card').querySelector('h2').textContent === 'Novo atendente' && f.querySelector('#user_name').value === '' && !f.dataset.id && f.querySelector('[data-action="user-edit-cancel"]').hidden && f.querySelector('button[type="submit"]').textContent === 'Criar conta'; })()`));
+      await evaluate(`(${userRow(qaAttendantEmail)}).querySelector('[data-action="user-edit"]').click()`);
+      await evaluate(`(() => { const f = ${userForm}; f.querySelector('#user_name').value = 'Atendente QA Editado'; f.requestSubmit(); })()`);
+      await until(`(${userRow(qaAttendantEmail)})?.textContent.includes('Atendente QA Editado')`, 'atendente editado');
+      check('Salvar alteracoes grava o nome novo e volta ao modo de criacao', (await api('GET', '/api/users')).body.data.find(u => u.id === newAttendant.id)?.name === 'Atendente QA Editado' && await evaluate(`${userForm}.querySelector('button[type="submit"]').textContent === 'Criar conta' && !${userForm}.dataset.id`));
+      const qaDeleteEmail = `qa.excluir.${Date.now()}@cti.demo`;
+      await createUser('Atendente QA Excluir', qaDeleteEmail);
+      const deleteId = (await api('GET', '/api/users')).body.data.find(u => u.email === qaDeleteEmail)?.id;
+      const removeButton = email => `(${userRow(email)}).querySelector('[data-action="user-remove"]')`;
+      check('Conta sem historico oferece Excluir', await evaluate(`${removeButton(qaDeleteEmail)}.textContent.trim() === 'Excluir'`));
+      await evaluate(`${removeButton(qaDeleteEmail)}.click()`);
+      check('Primeiro clique em Excluir so pede confirmacao', await evaluate(`${removeButton(qaDeleteEmail)}.textContent.trim() === 'Confirmar exclusão'`) && (await api('GET', '/api/users')).body.data.some(u => u.id === deleteId));
+      await pause(5300);
+      check('Confirmacao volta ao texto original depois de 5 segundos', await evaluate(`${removeButton(qaDeleteEmail)}.textContent.trim() === 'Excluir'`));
+      await evaluate(`${removeButton(qaDeleteEmail)}.click()`);
+      await evaluate(`${removeButton(qaDeleteEmail)}.click()`);
+      await until(`!(${userRow(qaDeleteEmail)})`, 'conta excluida some da lista');
+      check('Segundo clique exclui a conta sem historico', !(await api('GET', '/api/users')).body.data.some(u => u.id === deleteId) && await evaluate(`document.querySelector('#toast').textContent.includes('excluída')`));
+      const qaArchiveEmail = `qa.arquivar.${Date.now()}@cti.demo`;
+      await createUser('Atendente QA Arquivar', qaArchiveEmail);
+      const archiveId = (await api('GET', '/api/users')).body.data.find(u => u.email === qaArchiveEmail)?.id;
+      const archivedTicket = await nodeRequest(qaArchiveEmail, 'POST', '/api/tickets', { client_id: 1, subject: 'Atendimento QA do atendente arquivado', channel: 'Portal', priority: 'low', status: 'resolved', solution: 'Solucao registrada pelo atendente que sera arquivado.' });
+      await evaluate('location.reload()');
+      await until(`!!document.querySelector('#users-list .data-table') && !!(${userRow(qaArchiveEmail)})`, 'equipe recarregada com a conta que tem historico');
+      check('Conta com historico oferece Arquivar', archivedTicket.status === 201 && await evaluate(`${removeButton(qaArchiveEmail)}.textContent.trim() === 'Arquivar'`), archivedTicket.status);
+      await toggleUser(qaArchiveEmail, archiveId, 'user-deactivate', 'Inativo');
+      check('Desativar conta com historico mantem o botao Arquivar', await evaluate(`${removeButton(qaArchiveEmail)}.textContent.trim() === 'Arquivar'`));
+      await toggleUser(qaArchiveEmail, archiveId, 'user-reactivate', 'Ativo');
+      await evaluate(`${removeButton(qaArchiveEmail)}.click()`);
+      check('Primeiro clique em Arquivar so pede confirmacao', await evaluate(`${removeButton(qaArchiveEmail)}.textContent.trim() === 'Confirmar arquivamento'`));
+      await evaluate(`${removeButton(qaArchiveEmail)}.click()`);
+      await until(`!(${userRow(qaArchiveEmail)})`, 'conta arquivada some da lista');
+      const keptTicket = (await api('GET', '/api/bootstrap')).body.data.tickets.find(t => t.id === archivedTicket.body.data.id);
+      check('Arquivar tira a conta da lista e preserva o atendimento com o nome dela', !(await api('GET', '/api/users')).body.data.some(u => u.id === archiveId) && keptTicket?.attendant_name === 'Atendente QA Arquivar', keptTicket?.attendant_name);
       await shot('supervisor-equipe');
     }
     if (role === 'manager') {
@@ -425,6 +477,11 @@ try {
       check('Gestor desativa o supervisor', Number((await api('GET', '/api/users')).body.data.find(u => u.id === newSupervisor.id)?.active) === 0);
       await toggleUser(qaSupervisorEmail, newSupervisor.id, 'user-reactivate', 'Ativo');
       check('Gestor reativa o supervisor', Number((await api('GET', '/api/users')).body.data.find(u => u.id === newSupervisor.id)?.active) === 1);
+      await evaluate(`(${userRow(qaSupervisorEmail)}).querySelector('[data-action="user-edit"]').click()`);
+      check('Gestor: Editar carrega a equipe do supervisor', await evaluate(`document.querySelector('#user-form #team_id').value === ${JSON.stringify(String(qaTeam))} && document.querySelector('#user-form').closest('.form-card').querySelector('h2').textContent === 'Editar supervisor'`));
+      await evaluate(`(() => { const f = document.querySelector('#user-form'); f.querySelector('#user_name').value = 'Supervisor QA Editado'; f.requestSubmit(); })()`);
+      await until(`(${userRow(qaSupervisorEmail)})?.textContent.includes('Supervisor QA Editado')`, 'supervisor editado');
+      check('Gestor edita o nome do supervisor', (await api('GET', '/api/users')).body.data.find(u => u.id === newSupervisor.id)?.name === 'Supervisor QA Editado');
       const usersTone = await evaluate(`(() => { const sum = el => getComputedStyle(el).color.match(/\\d+/g).slice(0, 3).map(Number).reduce((a, b) => a + b, 0); return { dark: !!document.querySelector('.theme-dash.dark'), cell: sum(document.querySelector('#users-list tbody td')), label: sum(document.querySelector('label[for="user_name"]')), input: sum(document.querySelector('#user_name')) }; })()`);
       check('Supervisores legivel no tema escuro do gestor (texto claro)', usersTone.dark && usersTone.cell > 450 && usersTone.label > 450 && usersTone.input > 450, usersTone);
       await shot('gestor-supervisores');

@@ -49,6 +49,14 @@ async function login(email) {
   await until('!!document.querySelector("#login-view") && !document.querySelector("#login-view").hidden', `login ${email}`);
   await evaluate(`(() => { document.querySelector('#login-email').value=${JSON.stringify(email)};document.querySelector('#login-password').value=${JSON.stringify(password)};document.querySelector('#login-form').requestSubmit(); })()`);
 }
+async function api(method, route, body) {
+  return evaluate(`(async () => {
+    const session = await (await fetch('/api/session')).json();
+    const response = await fetch(${JSON.stringify(route)}, {method:${JSON.stringify(method)},headers:{${body === undefined ? '' : "'Content-Type':'application/json',"}'X-CSRF-Token':session.data.csrf_token},${body === undefined ? '' : `body:JSON.stringify(${JSON.stringify(body)}),`}credentials:'same-origin'});
+    return {status:response.status,body:await response.json().catch(() => null)};
+  })()`);
+}
+const card = name => `[...document.querySelectorAll('#lista li')].find(li => li.querySelector('.item-nome')?.textContent === ${JSON.stringify(name)})`;
 async function submitClient(name, city, state, email = '') {
   await evaluate(`(() => { document.querySelector('#cliente-nome').value=${JSON.stringify(name)};document.querySelector('#cliente-cidade').value=${JSON.stringify(city)};document.querySelector('#cliente-uf').value=${JSON.stringify(state)};const e=document.querySelector('#cliente-email');if(e)e.value=${JSON.stringify(email)};document.querySelector('#cadastro-form').requestSubmit(); })()`);
 }
@@ -80,6 +88,7 @@ try {
   check('Select de UF com 27 estados', (await evaluate('document.querySelectorAll("#cliente-uf option:not([value=\\"\\"])").length')) === 27);
   check('Link para o sistema geral', await evaluate('[...document.querySelectorAll("a")].some(a => a.getAttribute("href") === "/")'));
   check('Campos com label associado', await evaluate('["cliente-nome","cliente-cidade","cliente-uf","cliente-email","busca"].every(id => document.querySelector(`label[for="${id}"]`))'));
+  check('Formulario na ordem nome, e-mail, cidade e UF', (await evaluate(`[...document.querySelectorAll('#cadastro-form input, #cadastro-form select')].map(e => e.id).join('|')`)) === 'cliente-nome|cliente-email|cliente-cidade|cliente-uf');
   check('Campo de e-mail de acesso obrigatorio com rotulo e dica da senha padrao', await evaluate(`(() => { const e = document.querySelector('#cliente-email'); const hint = document.getElementById(e?.getAttribute('aria-describedby') ?? ''); return e?.type === 'email' && e.required && document.querySelector('label[for="cliente-email"]').textContent.trim() === 'E-mail de acesso da empresa' && /senha padrão/.test(hint?.textContent ?? ''); })()`));
 
   await submitClient(`${clientName} sem email`, 'Campinas', 'SP');
@@ -107,6 +116,26 @@ try {
   await evaluate(`(() => { const b = document.querySelector('#busca'); b.value='campinas'; b.dispatchEvent(new Event('input', {bubbles:true})); })()`);
   await pause(200);
   check('Busca por cidade filtra a lista', await evaluate(`(() => { const items = [...document.querySelectorAll('#lista li')]; return items.length >= 1 && items.every(li => /campinas/i.test(li.innerText)); })()`));
+  const noAccessName = `QA Sem Acesso ${Date.now()}`;
+  const noAccess = await api('POST', '/api/clients', { name: noAccessName, city: 'Recife', state: 'PE' });
+  await cdp('Page.navigate', { url: `${base}/clientes/` });
+  await until(`!!(${card(noAccessName)})`, 'lista com a empresa sem acesso');
+  check('Cartao mostra o e-mail de acesso ou o aviso de sem acesso', noAccess.status === 201 && await evaluate(`(${card(noAccessName)}).innerText.includes('Sem acesso à plataforma')`) && await evaluate(`(${card(clientName)}).innerText.includes(${JSON.stringify(clientEmail)}) && [...document.querySelectorAll('#lista li')].some(li => li.innerText.includes('Sem acesso à plataforma'))`));
+  check('Atendente ve Editar em cada cartao e nenhum botao de remocao', await evaluate(`document.querySelectorAll('#lista li').length === document.querySelectorAll('#lista [data-acao="editar"]').length && !document.querySelector('#lista [data-acao="remover"]')`));
+  await evaluate(`(${card(clientName)}).querySelector('[data-acao="editar"]').click()`);
+  check('Editar carrega os dados no formulario de cima e troca titulo e botao', await evaluate(`document.querySelector('#cadastro-titulo').textContent === 'Editar cliente' && document.querySelector('#cliente-nome').value === ${JSON.stringify(clientName)} && document.querySelector('#cliente-email').value === ${JSON.stringify(clientEmail)} && document.querySelector('#cliente-cidade').value === 'Campinas' && document.querySelector('#cliente-uf').value === 'SP' && document.querySelector('#cadastrar').textContent === 'Salvar alterações' && !document.querySelector('#cancelar-edicao').hidden`));
+  await evaluate(`document.querySelector('#cancelar-edicao').click()`);
+  check('Cancelar volta ao cadastro com o formulario limpo', await evaluate(`document.querySelector('#cadastro-titulo').textContent === 'Novo cliente' && document.querySelector('#cliente-nome').value === '' && document.querySelector('#cancelar-edicao').hidden`));
+  await evaluate(`(${card(clientName)}).querySelector('[data-acao="editar"]').click()`);
+  await evaluate(`(() => { document.querySelector('#cliente-cidade').value = 'Sorocaba'; document.querySelector('#cadastro-form').requestSubmit(); })()`);
+  await until(`(${card(clientName)})?.innerText.includes('Sorocaba')`, 'cidade editada no cartao');
+  check('Salvar alteracoes grava a cidade nova e volta ao cadastro', await evaluate(`/atualizados/.test(document.querySelector('#mensagem').innerText) && document.querySelector('#cadastro-titulo').textContent === 'Novo cliente'`) && (await api('GET', '/api/bootstrap')).body.data.clients.find(c => c.name === clientName)?.city === 'Sorocaba');
+  const semAcesso = (await api('GET', '/api/bootstrap')).body.data.clients.find(c => !c.login_email);
+  if (semAcesso) {
+    await evaluate(`(${card(semAcesso.name)}).querySelector('[data-acao="editar"]').click()`);
+    check('Empresa sem acesso edita com o e-mail travado', await evaluate(`document.querySelector('#cliente-email').disabled && /não tem acesso/.test(document.querySelector('#cliente-email-dica').textContent)`));
+    await evaluate(`document.querySelector('#cancelar-edicao').click()`);
+  }
 
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await pause(300);
@@ -123,7 +152,55 @@ try {
   await shot('clientes-negado');
 
   await evaluate('document.querySelector("#sair").click()');
-  await until('!document.querySelector("#login-view").hidden', 'logout do gestor');
+  await until('!document.querySelector("#login-view").hidden', 'logout antes da supervisora');
+  await login('marina@cti.demo');
+  await until('document.querySelector("#app-view") && !document.querySelector("#app-view").hidden && document.querySelectorAll("#lista li").length > 0', 'lista da supervisora');
+  check('Supervisora ve Excluir ou Arquivar conforme o historico', await evaluate(`[...document.querySelectorAll('#lista li')].every(li => { const b = li.querySelector('[data-acao="remover"]'); return b && ['Excluir', 'Arquivar'].includes(b.textContent); })`));
+  const deleteName = `QA Excluir ${Date.now()}`;
+  await submitClient(deleteName, 'Recife', 'PE', `qa.excluir.${Date.now()}@cti.demo`);
+  await until(`!!(${card(deleteName)})`, 'empresa para excluir na lista');
+  const removeOf = name => `(${card(name)}).querySelector('[data-acao="remover"]')`;
+  check('Empresa sem historico oferece Excluir', await evaluate(`${removeOf(deleteName)}.textContent === 'Excluir'`));
+  await evaluate(`${removeOf(deleteName)}.click()`);
+  check('Primeiro clique so pede confirmacao da exclusao', await evaluate(`${removeOf(deleteName)}.textContent === 'Confirmar exclusão'`));
+  await evaluate(`${removeOf(deleteName)}.click()`);
+  await until(`!(${card(deleteName)})`, 'empresa excluida some da lista');
+  check('Segundo clique exclui a empresa sem historico', !(await api('GET', '/api/bootstrap')).body.data.clients.some(c => c.name === deleteName) && /excluído/.test(await evaluate('document.querySelector("#mensagem").innerText')));
+  const archiveName = `QA Arquivar ${Date.now()}`;
+  const archiveEmail = `qa.arquivar.${Date.now()}@cti.demo`;
+  await submitClient(archiveName, 'Natal', 'RN', archiveEmail);
+  await until(`!!(${card(archiveName)})`, 'empresa para arquivar na lista');
+  const archiveId = (await api('GET', '/api/bootstrap')).body.data.clients.find(c => c.name === archiveName)?.id;
+  await api('POST', '/api/logout');
+  await api('POST', '/api/login', { email: 'rafael@cti.demo', password });
+  const historyTicket = await api('POST', '/api/tickets', { client_id: archiveId, subject: 'Atendimento QA da empresa arquivada', channel: 'Portal', priority: 'low', status: 'resolved', solution: 'Solucao registrada para gerar historico da empresa.' });
+  await api('POST', '/api/logout');
+  await api('POST', '/api/login', { email: archiveEmail, password });
+  const confirmed = await api('POST', '/api/feedbacks', { ticket_id: historyTicket.body?.data?.id, rating: 5, resolved: true, mode: 'quick' });
+  await api('POST', '/api/logout');
+  await api('POST', '/api/login', { email: 'marina@cti.demo', password });
+  await cdp('Page.navigate', { url: `${base}/clientes/` });
+  await until(`!!(${card(archiveName)})`, 'lista recarregada com a empresa que tem historico');
+  check('Empresa com historico oferece Arquivar', historyTicket.status === 201 && confirmed.status === 201 && await evaluate(`${removeOf(archiveName)}.textContent === 'Arquivar'`), { ticket: historyTicket.status, feedback: confirmed.status });
+  await evaluate(`${removeOf(archiveName)}.click()`);
+  check('Primeiro clique so pede confirmacao do arquivamento', await evaluate(`${removeOf(archiveName)}.textContent === 'Confirmar arquivamento'`));
+  await evaluate(`${removeOf(archiveName)}.click()`);
+  await until(`!(${card(archiveName)})`, 'empresa arquivada some da lista');
+  const afterArchive = (await api('GET', '/api/bootstrap')).body.data;
+  check('Arquivar tira a empresa da lista e preserva o atendimento com o nome dela', !afterArchive.clients.some(c => c.id === archiveId) && afterArchive.tickets.find(t => t.id === historyTicket.body.data.id)?.client_name === archiveName);
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await pause(300);
+  await shot('clientes-supervisor-1280');
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await pause(300);
+  const supervisorMobile = await evaluate('({width:document.documentElement.scrollWidth,viewport:innerWidth})');
+  check('Mobile 390 sem rolagem horizontal (supervisora com acoes)', supervisorMobile.width <= supervisorMobile.viewport, supervisorMobile);
+  await shot('clientes-supervisor-390');
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  check('Login da empresa arquivada deixa de entrar', (await api('POST', '/api/login', { email: archiveEmail, password })).status === 401);
+
+  await evaluate('document.querySelector("#sair").click()');
+  await until('!document.querySelector("#login-view").hidden', 'logout da supervisora');
   await cdp('Page.navigate', { url: base });
   await until('!!document.querySelector("#login-form")', 'login da tela principal');
   await evaluate(`(() => { document.querySelector('#login-email').value=${JSON.stringify(clientEmail)};document.querySelector('#login-password').value=${JSON.stringify(password)};document.querySelector('#login-form').requestSubmit(); })()`);
