@@ -21,10 +21,17 @@ Testes em banco novo, nesta data: backend 494 de 494, análise 43 de 43, cliente
 Gemini 40 de 40, processamento hospedado 40 de 40, HTTP 30 de 30, clientes 34 de
 34 e navegador 282 de 283. A falha era a conhecida do rodapé do login, corrigida logo abaixo.
 
-**Ainda não publicado.** Para publicar: backup no servidor
-(`php bin/console.php backup`), o comando de atualização da seção de 13 de
-novembro abaixo, e conferência pelo endereço da Vercel. A migração só acrescenta a
-coluna `archived` com padrão 0 em `users` e `clients`.
+**Publicado em 13/11/2026, 20h02 (horário do servidor),** commit `ed6cddb`, pela
+rede do celular. Backup anterior em
+`~/private/backups/cti-backup-20261113-200223` (796,7 KB, banco e áudios). O
+backup pela linha de comando precisa carregar a configuração privada:
+`php -d auto_prepend_file=$HOME/private/cti-env.php bin/console.php backup --dir=$HOME/private/backups --keep=30`.
+
+Conferência depois do deploy: `users` e `clients` com a coluna `archived`;
+11 usuários, todos ativos; 7 empresas; 44 atendimentos; 33 feedbacks; 2 reservas
+do Gemini; `PRAGMA integrity_check` igual a `ok`. Pelos dois endereços, `/` e
+`/clientes/` respondem 200, `/api/bootstrap` sem login responde 401 e o
+`app.js` servido já é o novo.
 
 As pendências 1 e 2 da seção seguinte estão resolvidas por esta entrega.
 
