@@ -19,7 +19,7 @@ revisão em [editar, excluir e arquivar](plano-editar-excluir.md). Resumo:
 
 Testes em banco novo, nesta data: backend 494 de 494, análise 43 de 43, cliente
 Gemini 40 de 40, processamento hospedado 40 de 40, HTTP 30 de 30, clientes 34 de
-34 e navegador 282 de 283. A falha é a conhecida do rodapé do login.
+34 e navegador 282 de 283. A falha era a conhecida do rodapé do login, corrigida logo abaixo.
 
 **Ainda não publicado.** Para publicar: backup no servidor
 (`php bin/console.php backup`), o comando de atualização da seção de 13 de
@@ -27,6 +27,21 @@ novembro abaixo, e conferência pelo endereço da Vercel. A migração só acres
 coluna `archived` com padrão 0 em `users` e `clients`.
 
 As pendências 1 e 2 da seção seguinte estão resolvidas por esta entrega.
+
+Na mesma data, correções feitas depois da revisão:
+
+- **Sessão de conta excluída.** O SQLite reaproveita o maior `id` apagado em
+  `users`, e a sessão guardava só o `id`: a sessão aberta de uma conta excluída
+  passava a valer como a conta nova com o mesmo `id`. Agora a sessão guarda uma
+  impressão (`sha256` do `id` com o `password_hash`) e `user()` a confere. Efeito
+  no deploy: quem estiver logado precisa entrar de novo uma vez.
+- Rótulo "Áudio gravado" virou "Áudio"; o painel de gravação não diz mais "neste
+  computador"; o teste do rodapé do login deixou de exigir textos removidos de
+  propósito no commit `f138e99`.
+
+Testes depois dessas correções, em banco novo: backend 497 de 497, análise 43 de
+43, processamento hospedado 40 de 40, HTTP 30 de 30, clientes 34 de 34 e
+navegador 283 de 283.
 
 ## Atualização de 13 de novembro de 2026 (noite): gestão de usuários publicada
 
@@ -139,15 +154,12 @@ Pendências abertas nesta rodada:
 - Feedback marcado como "Resolveu" com conteúdo classificado como crítico pela
   IA encerra o atendimento sem alertar o supervisor. Decidir se a análise deve
   gerar alerta nesse caso.
-- A lista do supervisor mostra "Áudio gravado" também para áudio anexado; o
-  servidor não guarda a diferença.
+- O servidor não guarda se o áudio foi gravado ou anexado. A interface passou a
+  dizer só "Áudio"; se a diferença importar para a análise, é preciso gravar a
+  origem no envio.
 - O player do áudio na revisão mostra duração `Infinity` e não exibe o tempo
   total, embora reproduza o arquivo completo. Causa não verificada; suspeita de
   falta de `Content-Length` ou suporte a `Range` na rota de áudio.
-- O painel de gravação ainda diz que o áudio é analisado "neste computador".
-- O teste `Login sem textos de projeto academico no rodape` em
-  `tests/browser.mjs` falha desde o commit `f138e99`, que mudou os textos do
-  login.
 - O teste `tests/hosted-browser.mjs` falhou uma vez em quatro com
   `Invalid InterceptionId` e passou nas outras; instabilidade do próprio teste.
 
