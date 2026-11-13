@@ -1,5 +1,33 @@
 # Estado atual do MVP
 
+## Atualização de 13 de novembro de 2026 (fim do dia): editar, excluir e arquivar
+
+Clientes, atendentes e supervisores agora podem ser editados, excluídos e
+arquivados, e a tela `/clientes/` foi remodelada. Plano, decisões, desvios e
+revisão em [editar, excluir e arquivar](plano-editar-excluir.md). Resumo:
+
+- Exclusão real só para quem nunca participou de atendimento, revisão, resposta
+  ou auditoria. Com histórico, o botão vira "Arquivar": a conta ou empresa sai
+  das listas, perde o acesso, não volta e mantém o nome nos atendimentos antigos.
+- Atendente e supervisor editam empresas; só o supervisor exclui ou arquiva.
+  Usuários seguem a matriz de desativar.
+- `/clientes/` usa a linguagem visual do sistema, com o formulário na ordem nome,
+  e-mail, cidade e UF, e a lista em cartões com as ações.
+- O seed dá login às empresas 3 a 6 (`patricia@`, `joao@`, `renata@` e
+  `marcos@cti.demo`). O seed só roda em banco vazio: **o banco publicado não
+  ganha esses logins** pelo deploy.
+
+Testes em banco novo, nesta data: backend 494 de 494, análise 43 de 43, cliente
+Gemini 40 de 40, processamento hospedado 40 de 40, HTTP 30 de 30, clientes 34 de
+34 e navegador 282 de 283. A falha é a conhecida do rodapé do login.
+
+**Ainda não publicado.** Para publicar: backup no servidor
+(`php bin/console.php backup`), o comando de atualização da seção de 13 de
+novembro abaixo, e conferência pelo endereço da Vercel. A migração só acrescenta a
+coluna `archived` com padrão 0 em `users` e `clients`.
+
+As pendências 1 e 2 da seção seguinte estão resolvidas por esta entrega.
+
 ## Atualização de 13 de novembro de 2026 (noite): gestão de usuários publicada
 
 Endereço para o pitch: **https://cti-escuta-proxy.vercel.app**. É um repasse na
