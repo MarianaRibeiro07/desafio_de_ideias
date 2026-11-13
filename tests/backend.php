@@ -31,7 +31,7 @@ function login(string $email): void {
 try {
     $seed = $app->db();
     $count = fn(string $sql) => (int)$seed->query($sql)->fetchColumn();
-    check($count('SELECT COUNT(*) FROM tickets') === 42 && $count('SELECT COUNT(*) FROM feedbacks') === 31 && $count('SELECT COUNT(*) FROM users') === 9, 'Seed demo tem 42 atendimentos (32 recentes e 10 do periodo anterior), 31 feedbacks e 9 usuarios');
+    check($count('SELECT COUNT(*) FROM tickets') === 42 && $count('SELECT COUNT(*) FROM feedbacks') === 31 && $count('SELECT COUNT(*) FROM users') === 13, 'Seed demo tem 42 atendimentos (32 recentes e 10 do periodo anterior), 31 feedbacks e 13 usuarios');
     check($count("SELECT COUNT(*) FROM feedbacks WHERE sentiment='negative' AND rating<=2") >= 3, 'Seed tem feedbacks negativos com notas 1 e 2');
     check($count("SELECT COUNT(*) FROM feedbacks WHERE sentiment='neutral'") >= 1 && $count("SELECT COUNT(*) FROM feedbacks WHERE sentiment='positive'") >= 1, 'Seed tem feedbacks neutros e positivos');
     check($count("SELECT COUNT(*) FROM feedbacks WHERE criticality='critical' AND reviewed=0") >= 3, 'Seed tem pelo menos 3 criticos sem revisao');
@@ -654,7 +654,7 @@ try {
     check((int)$oldU->query('SELECT COUNT(*) FROM users WHERE active=1')->fetchColumn() === 2, 'Migracao repetida da coluna active deixa todos os usuarios existentes ativos');
     check(in_array('target_user_id', array_column($oldU->query('PRAGMA table_info(audit_events)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'Migracao adiciona target_user_id na auditoria');
     unset($oldU);
-    check((int)$u->query('SELECT COUNT(*) FROM users WHERE active=1')->fetchColumn() === 9, 'Base nova nasce com os 9 usuarios ativos');
+    check((int)$u->query('SELECT COUNT(*) FROM users WHERE active=1')->fetchColumn() === 13, 'Base nova nasce com os 13 usuarios ativos');
     check($pw('bruno@cti.demo')['status'] === 200, 'Bruno ativo entra');
     $u->exec("UPDATE users SET active=0 WHERE email='bruno@cti.demo'");
     check(req('GET', '/api/bootstrap')['status'] === 401, 'Sessao aberta de usuario desativado perde acesso na rota seguinte');
@@ -687,7 +687,7 @@ try {
     // U3: API de usuarios
     $pw('helena@cti.demo');
     $list = req('GET', '/api/users');
-    check($list['status'] === 200 && array_unique(array_map(fn($r) => $one('SELECT role FROM users WHERE id=?', [$r['id']])['role'], $list['body']['data'])) === ['supervisor'] && count($list['body']['data']) === 2 && array_keys($list['body']['data'][0]) === ['id', 'name', 'email', 'team_id', 'active'], 'Gestor lista os supervisores com os campos previstos');
+    check($list['status'] === 200 && array_unique(array_map(fn($r) => $one('SELECT role FROM users WHERE id=?', [$r['id']])['role'], $list['body']['data'])) === ['supervisor'] && count($list['body']['data']) === 2 && array_keys($list['body']['data'][0]) === ['id', 'name', 'email', 'team_id', 'active', 'has_history'],'Gestor lista os supervisores com os campos previstos');
     $newSup = req('POST', '/api/users', ['name' => 'Paula Reis', 'email' => 'paula@cti.demo', 'team_id' => 2, 'role' => 'manager']);
     $paula = $one('SELECT * FROM users WHERE email=?', ['paula@cti.demo']);
     check($newSup['status'] === 422 && $paula === null, 'Corpo com perfil e recusado: o servidor decide o perfil');
@@ -713,8 +713,8 @@ try {
     $pw('marina@cti.demo');
     $team = req('GET', '/api/users');
     check($team['status'] === 200 && array_column($team['body']['data'], 'email') === ['rafael@cti.demo', 'bruno@cti.demo'], 'Supervisor lista so os atendentes da propria equipe');
-    $newAtt = req('POST', '/api/users', ['name' => 'Joao Lima', 'email' => 'joao@cti.demo']);
-    $joao = $one('SELECT * FROM users WHERE email=?', ['joao@cti.demo']);
+    $newAtt = req('POST', '/api/users', ['name' => 'Joao Lima', 'email' => 'joao.lima@cti.demo']);
+    $joao = $one('SELECT * FROM users WHERE email=?', ['joao.lima@cti.demo']);
     check($newAtt['status'] === 201 && $joao['role'] === 'attendant' && (int)$joao['team_id'] === 1, 'Supervisor cria atendente na propria equipe');
     check(req('POST', '/api/users', ['name' => 'Joana Lima', 'email' => 'joana@cti.demo', 'team_id' => 2])['status'] === 422, 'Supervisor nao escolhe equipe');
     $openTickets = (int)$u->query("SELECT COUNT(*) FROM tickets WHERE attendant_id=1 AND status='active'")->fetchColumn();
@@ -726,7 +726,7 @@ try {
     check(req('POST', "/api/users/{$joao['id']}/deactivate")['status'] === 200, 'Supervisor desativa atendente da propria equipe');
     check(req('GET', '/api/bootstrap')['body']['data']['attendants'] === array_values(array_filter(req('GET', '/api/bootstrap')['body']['data']['attendants'], fn($a) => $a['id'] !== $joao['id'])), 'Atendente desativado some da lista de atendentes');
     check(req('POST', "/api/users/{$joao['id']}/reactivate")['status'] === 200, 'Supervisor reativa atendente da propria equipe');
-    check($pw('joao@cti.demo')['status'] === 200 && req('GET', '/api/bootstrap')['body']['data']['user']['team_id'] === 1, 'Atendente criado entra com a senha padrao');
+    check($pw('joao.lima@cti.demo')['status'] === 200 && req('GET', '/api/bootstrap')['body']['data']['user']['team_id'] === 1, 'Atendente criado entra com a senha padrao');
     foreach (['rafael@cti.demo' => 'atendente', 'lucas@cti.demo' => 'cliente'] as $email => $who) {
         $pw($email);
         check(req('GET', '/api/users')['status'] === 403 && req('POST', '/api/users', ['name' => 'Intruso', 'email' => 'intruso@cti.demo'])['status'] === 403 && req('POST', '/api/users/5/deactivate')['status'] === 403, "Perfil $who nao gerencia usuarios");
@@ -734,6 +734,165 @@ try {
     $_SESSION = [];
     check(req('GET', '/api/users')['status'] === 401, 'API de usuarios exige sessao');
     unset($u);
+
+    // E: editar, excluir e arquivar contas e empresas (base nova e isolada)
+    $app = new App(new PDO('sqlite:' . $nDir . '/edit.sqlite'), $nDir . '/edit-storage');
+    $app->initialize();
+    $e = $app->db();
+    $eOne = fn(string $sql, array $p = []) => (function () use ($e, $sql, $p) { $s = $e->prepare($sql); $s->execute($p); return $s->fetch(PDO::FETCH_ASSOC) ?: null; })();
+    $rowOf = fn(array $rows, int $id) => array_values(array_filter($rows, fn($r) => (int)$r['id'] === $id))[0] ?? null;
+
+    // E1: colunas archived e listas
+    $pw('marina@cti.demo');
+    $rafaelRow = $rowOf(req('GET', '/api/users')['body']['data'], 1);
+    check(($rafaelRow['has_history'] ?? null) === true, 'GET /api/users marca has_history no atendente do seed');
+    $novaConta = req('POST', '/api/users', ['name' => 'Conta Nova', 'email' => 'conta.nova@cti.demo'])['body']['data'];
+    check(($rowOf(req('GET', '/api/users')['body']['data'], $novaConta['id'])['has_history'] ?? null) === false, 'Conta recem-criada nao tem historico');
+    $e->exec("UPDATE users SET archived=1,active=0 WHERE id={$novaConta['id']}");
+    check($rowOf(req('GET', '/api/users')['body']['data'], $novaConta['id']) === null, 'Conta arquivada some de GET /api/users');
+    $pw('rafael@cti.demo');
+    $aurora = $rowOf(req('GET', '/api/bootstrap')['body']['data']['clients'], 1);
+    check(($aurora['login_email'] ?? null) === 'lucas@cti.demo' && ($aurora['has_history'] ?? null) === true, 'Bootstrap do atendente traz login_email e has_history da empresa');
+    $semAcesso = req('POST', '/api/clients', $loc + ['name' => 'Empresa Sem Acesso'])['body']['data'];
+    $semRow = $rowOf(req('GET', '/api/bootstrap')['body']['data']['clients'], $semAcesso['id']);
+    check($semRow !== null && array_key_exists('login_email', $semRow) && $semRow['login_email'] === null && $semRow['has_history'] === false, 'Empresa sem login aparece com login_email nulo e sem historico');
+    $e->exec("UPDATE clients SET archived=1 WHERE id={$semAcesso['id']}");
+    check($rowOf(req('GET', '/api/bootstrap')['body']['data']['clients'], $semAcesso['id']) === null, 'Empresa arquivada some do bootstrap do atendente');
+    check(req('POST', '/api/tickets', ['client_id' => $semAcesso['id'], 'subject' => 'Empresa arquivada', 'channel' => 'Portal', 'priority' => 'medium'])['status'] === 422, 'Atendimento com empresa arquivada responde 422');
+    $pw('helena@cti.demo');
+    check($rowOf(req('GET', '/api/bootstrap')['body']['data']['clients'], $semAcesso['id']) === null, 'Empresa arquivada some do bootstrap do gestor');
+    $oldE = new PDO('sqlite:' . $nDir . '/old-edit.sqlite');
+    $oldE->exec("CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE clients (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+      CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL, team_id INTEGER, client_id INTEGER);
+      INSERT INTO teams VALUES (1,'T'); INSERT INTO clients VALUES (1,'Antiga SA'); INSERT INTO users VALUES (1,'U','u@x.com','x','attendant',1,NULL);");
+    for ($i = 0; $i < 2; $i++) { (new App($oldE, $nDir . '/old-edit-storage'))->initialize(); }
+    check((int)$oldE->query('SELECT COUNT(*) FROM users WHERE archived=0')->fetchColumn() === 1 && (int)$oldE->query('SELECT COUNT(*) FROM clients WHERE archived=0')->fetchColumn() === 1, 'Migracao repetida da coluna archived deixa usuarios e empresas existentes sem arquivar');
+    unset($oldE);
+
+    // E2: editar usuario
+    $pw('marina@cti.demo');
+    $ed = req('POST', '/api/users', ['name' => 'Edicao Teste', 'email' => 'edicao@cti.demo'])['body']['data']['id'];
+    $edited = req('PATCH', "/api/users/$ed", ['name' => 'Edicao Corrigida', 'email' => ' Edicao.Nova@CTI.demo ']);
+    check($edited['status'] === 200 && $edited['body']['data']['name'] === 'Edicao Corrigida' && $edited['body']['data']['email'] === 'edicao.nova@cti.demo' && array_keys($edited['body']['data']) === ['id', 'name', 'email', 'team_id', 'active'], 'Supervisor edita nome e e-mail do atendente com a resposta igual a de criar');
+    check($pw('edicao.nova@cti.demo')['status'] === 200, 'Atendente editado entra com o e-mail novo');
+    $pw('marina@cti.demo');
+    check(req('PATCH', "/api/users/$ed", ['email' => 'edicao.nova@cti.demo'])['status'] === 200, 'O proprio e-mail e aceito na edicao');
+    $taken = req('PATCH', "/api/users/$ed", ['email' => 'BRUNO@cti.demo']);
+    check($taken['status'] === 409 && $taken['body']['message'] === 'Este e-mail ja tem acesso a plataforma.' && $eOne('SELECT email FROM users WHERE id=?', [$ed])['email'] === 'edicao.nova@cti.demo', 'E-mail de outra conta responde 409 sem alterar');
+    check(req('PATCH', "/api/users/$ed", ['team_id' => 2])['status'] === 422 && (int)$eOne('SELECT team_id FROM users WHERE id=?', [$ed])['team_id'] === 1, 'Supervisor nao troca a equipe do atendente');
+    check(req('PATCH', "/api/users/$ed", [])['status'] === 422, 'Edicao sem campos responde 422');
+    check(req('PATCH', "/api/users/$ed", ['name' => 'x'])['status'] === 422 && req('PATCH', "/api/users/$ed", ['email' => 'invalido'])['status'] === 400, 'Nome curto e e-mail invalido na edicao sao recusados');
+    check(req('PATCH', '/api/users/6', ['name' => 'Fora da Equipe'])['status'] === 403 && req('PATCH', '/api/users/8', ['name' => 'Outro Supervisor'])['status'] === 403 && req('PATCH', '/api/users/2', ['name' => 'Eu Mesma'])['status'] === 403, 'Supervisor nao edita fora da equipe, outro supervisor nem a si mesmo');
+    check(req('PATCH', "/api/users/{$novaConta['id']}", ['name' => 'Arquivada'])['status'] === 404 && req('PATCH', '/api/users/999', ['name' => 'Ninguem'])['status'] === 404, 'Conta arquivada ou inexistente responde 404 na edicao');
+    check((int)$eOne("SELECT COUNT(*) c FROM audit_events WHERE event='user_updated' AND user_id=2 AND target_user_id=?", [$ed])['c'] === 2, 'Edicao fica na auditoria com autor e alvo');
+    $pw('rafael@cti.demo');
+    check(req('PATCH', '/api/users/5', ['name' => 'Bruno Ferraz Filho'])['status'] === 403, 'Atendente nao edita usuarios');
+    $pw('helena@cti.demo');
+    check(req('PATCH', '/api/users/1', ['name' => 'Rafael M'])['status'] === 403 && req('PATCH', '/api/users/3', ['name' => 'Helena A'])['status'] === 403, 'Gestor nao edita atendente nem a si mesmo');
+    $move = req('PATCH', '/api/users/2', ['team_id' => 2]);
+    check($move['status'] === 409 && $move['body']['message'] === 'A equipe ficaria sem supervisor ativo.' && (int)$eOne('SELECT team_id FROM users WHERE id=2')['team_id'] === 1, 'Trocar de equipe a unica supervisora ativa da equipe 1 responde 409');
+    $supExtra = req('POST', '/api/users', ['name' => 'Supervisor Extra', 'email' => 'sup.extra@cti.demo', 'team_id' => 1])['body']['data']['id'];
+    $moved = req('PATCH', '/api/users/2', ['team_id' => 2, 'name' => 'Marina Duarte Silva']);
+    check($moved['status'] === 200 && (int)$moved['body']['data']['team_id'] === 2 && $moved['body']['data']['name'] === 'Marina Duarte Silva', 'Com outro supervisor ativo na origem, o gestor troca equipe e nome');
+    check(req('PATCH', '/api/users/2', ['team_id' => 99])['status'] === 400, 'Equipe inexistente na edicao responde 400');
+    check(req('PATCH', '/api/users/2', ['team_id' => 1])['status'] === 200 && (int)$eOne('SELECT team_id FROM users WHERE id=2')['team_id'] === 1, 'Gestor devolve a supervisora a equipe de origem');
+
+    // E3: excluir e arquivar usuario
+    $pw('marina@cti.demo');
+    $del = req('DELETE', "/api/users/$ed");
+    check($del['status'] === 200 && $eOne('SELECT id FROM users WHERE id=?', [$ed]) === null, 'Conta sem historico e apagada de verdade');
+    check((int)$eOne("SELECT COUNT(*) c FROM audit_events WHERE event='user_deleted' AND user_id=2 AND target_user_id=?", [$ed])['c'] === 1, 'Exclusao fica na auditoria com o id apagado como alvo');
+    check(req('DELETE', "/api/users/$ed")['status'] === 404, 'Excluir de novo responde 404');
+    $hist = req('POST', '/api/users', ['name' => 'Atendente Com Historico', 'email' => 'historico@cti.demo'])['body']['data']['id'];
+    $e->prepare("INSERT INTO tickets(protocol,client_id,attendant_id,team_id,subject,channel,status,created_at,response_due_at) VALUES ('ATD-HIST-0001',1,?,1,'Atendimento antigo do arquivado','Portal','resolved','2026-01-01T10:00:00+00:00','2026-01-01T14:00:00+00:00')")->execute([$hist]);
+    check(($rowOf(req('GET', '/api/users')['body']['data'], $hist)['has_history'] ?? null) === true, 'Atendimento antigo conta como historico na lista');
+    $histDel = req('DELETE', "/api/users/$hist");
+    check($histDel['status'] === 409 && $histDel['body']['message'] === 'Esta conta tem historico. Use arquivar.' && $eOne('SELECT id FROM users WHERE id=?', [$hist]) !== null, 'Conta com historico nao e apagada e responde 409');
+    $arc = req('POST', "/api/users/$hist/archive");
+    $histRow = $eOne('SELECT active,archived FROM users WHERE id=?', [$hist]);
+    check($arc['status'] === 200 && (int)$histRow['archived'] === 1 && (int)$histRow['active'] === 0, 'Arquivar marca a conta como arquivada e inativa');
+    $histTicket = array_values(array_filter(req('GET', '/api/bootstrap')['body']['data']['tickets'], fn($t) => $t['protocol'] === 'ATD-HIST-0001'))[0] ?? null;
+    check($histTicket !== null && $histTicket['attendant_name'] === 'Atendente Com Historico', 'Arquivar preserva o atendimento e o nome do atendente nele');
+    check((int)$eOne("SELECT COUNT(*) c FROM audit_events WHERE event='user_archived' AND user_id=2 AND target_user_id=?", [$hist])['c'] === 1, 'Arquivamento fica na auditoria com autor e alvo');
+    check($rowOf(req('GET', '/api/users')['body']['data'], $hist) === null, 'Conta arquivada some da lista da equipe');
+    check(req('POST', "/api/users/$hist/reactivate")['status'] === 404 && (int)$eOne('SELECT active FROM users WHERE id=?', [$hist])['active'] === 0, 'Conta arquivada nao volta por reativar');
+    check(req('POST', "/api/users/$hist/archive")['status'] === 404, 'Arquivar de novo responde 404');
+    check($pw('historico@cti.demo')['status'] === 401, 'Conta arquivada nao entra');
+    $pw('marina@cti.demo');
+    $busyDel = req('DELETE', '/api/users/1'); $busyArc = req('POST', '/api/users/1/archive');
+    check($busyDel['status'] === 409 && str_contains($busyDel['body']['message'], 'atendimentos em aberto') && $busyArc['status'] === 409 && str_contains($busyArc['body']['message'], 'atendimentos em aberto') && (int)$eOne('SELECT archived FROM users WHERE id=1')['archived'] === 0, 'Atendente com atendimento em aberto nao e excluido nem arquivado');
+    check(req('DELETE', '/api/users/6')['status'] === 403 && req('POST', '/api/users/6/archive')['status'] === 403 && req('DELETE', '/api/users/2')['status'] === 403 && req('POST', '/api/users/8/archive')['status'] === 403, 'Supervisor nao exclui nem arquiva fora da equipe, a si mesmo ou outro supervisor');
+    $pw('rafael@cti.demo');
+    check(req('DELETE', '/api/users/5')['status'] === 403 && req('POST', '/api/users/5/archive')['status'] === 403, 'Atendente nao exclui nem arquiva usuarios');
+    $pw('helena@cti.demo');
+    check(req('DELETE', '/api/users/1')['status'] === 403 && req('POST', '/api/users/1/archive')['status'] === 403, 'Gestor nao exclui nem arquiva atendente');
+    check(req('POST', '/api/users/2/deactivate')['status'] === 200, 'Gestor desativa Marina e deixa o supervisor extra sozinho na equipe 1');
+    $lonely = req('DELETE', "/api/users/$supExtra"); $lonelyArc = req('POST', "/api/users/$supExtra/archive");
+    check($lonely['status'] === 409 && $lonely['body']['message'] === 'A equipe ficaria sem supervisor ativo.' && $lonelyArc['status'] === 409 && (int)$eOne('SELECT archived FROM users WHERE id=?', [$supExtra])['archived'] === 0, 'Ultimo supervisor ativo da equipe nao e excluido nem arquivado');
+    check(req('POST', '/api/users/2/reactivate')['status'] === 200 && req('DELETE', "/api/users/$supExtra")['status'] === 200 && $eOne('SELECT id FROM users WHERE id=?', [$supExtra]) === null, 'Com a supervisora de volta, o gestor exclui o supervisor sem historico');
+
+    // E4: editar, excluir e arquivar empresa
+    $pw('rafael@cti.demo');
+    $nova = req('POST', '/api/clients', $loc + ['name' => 'Empresa Editavel', 'email' => 'editavel@cti.demo'])['body']['data']['id'];
+    $sem = req('POST', '/api/clients', $loc + ['name' => 'Empresa Sem Login'])['body']['data']['id'];
+    $ec = req('PATCH', "/api/clients/$nova", ['name' => 'Empresa Editada', 'city' => ' Recife ', 'state' => 'pe']);
+    check($ec['status'] === 200 && $ec['body']['data']['name'] === 'Empresa Editada' && $ec['body']['data']['city'] === 'Recife' && $ec['body']['data']['state'] === 'PE', 'Atendente edita nome, cidade e UF da empresa');
+    check($eOne("SELECT name FROM users WHERE email='editavel@cti.demo'")['name'] === 'Empresa Editada', 'Login criado pelo cadastro acompanha o nome novo da empresa');
+    check(req('PATCH', "/api/clients/$nova", ['name' => 'Empresa Editada'])['status'] === 200, 'O proprio nome e aceito na edicao');
+    $dupName = req('PATCH', "/api/clients/$nova", ['name' => 'grupo aurora logistica']);
+    check($dupName['status'] === 409 && $dupName['body']['message'] === 'Cliente ja cadastrado com esse nome.' && $eOne('SELECT name FROM clients WHERE id=?', [$nova])['name'] === 'Empresa Editada', 'Nome de outra empresa responde 409 sem alterar');
+    check(req('PATCH', '/api/clients/1', ['name' => 'Grupo Aurora Logistica SA'])['status'] === 200 && $eOne('SELECT name FROM users WHERE id=4')['name'] === 'Lucas Ferreira', 'Login com nome de pessoa nao muda quando a empresa e renomeada');
+    check(req('PATCH', "/api/clients/$nova", ['email' => ' Editada@CTI.demo '])['status'] === 200 && $pw('editada@cti.demo')['status'] === 200 && req('GET', '/api/bootstrap')['body']['data']['user']['client_id'] === $nova, 'Editar o e-mail troca o login, que entra com o e-mail novo');
+    check($pw('editavel@cti.demo')['status'] === 401, 'O e-mail antigo deixa de entrar');
+    $pw('rafael@cti.demo');
+    $takenC = req('PATCH', "/api/clients/$nova", ['email' => 'lucas@cti.demo']);
+    check($takenC['status'] === 409 && $takenC['body']['message'] === 'Este e-mail ja tem acesso a plataforma.', 'E-mail de outra conta responde 409 na edicao da empresa');
+    $noLogin = req('PATCH', "/api/clients/$sem", ['email' => 'novo.acesso@cti.demo']);
+    check($noLogin['status'] === 422 && $noLogin['body']['message'] === 'Esta empresa nao tem acesso a plataforma.' && $eOne("SELECT id FROM users WHERE email='novo.acesso@cti.demo'") === null, 'Empresa sem login responde 422 ao receber e-mail e nao cria login');
+    check(req('PATCH', "/api/clients/$nova", ['extra' => 1])['status'] === 422 && req('PATCH', "/api/clients/$nova", ['state' => 'XX'])['status'] === 400 && req('PATCH', "/api/clients/$nova", ['city' => 'A'])['status'] === 400 && req('PATCH', "/api/clients/$nova", [])['status'] === 422, 'Campo extra, UF e cidade invalidas e corpo vazio sao recusados');
+    check(req('PATCH', "/api/clients/{$semAcesso['id']}", ['city' => 'Natal'])['status'] === 404 && req('PATCH', '/api/clients/999', ['city' => 'Natal'])['status'] === 404, 'Empresa arquivada ou inexistente responde 404 na edicao');
+    check((int)$eOne("SELECT COUNT(*) c FROM audit_events WHERE event='client_updated' AND user_id=1")['c'] === 4, 'Cada edicao da empresa fica na auditoria');
+    check(req('DELETE', "/api/clients/$sem")['status'] === 403 && req('POST', "/api/clients/$sem/archive")['status'] === 403 && $eOne('SELECT id FROM clients WHERE id=?', [$sem]) !== null, 'Atendente edita mas recebe 403 ao excluir e arquivar empresa');
+    $pw('lucas@cti.demo');
+    check(req('PATCH', '/api/clients/1', ['city' => 'Curitiba'])['status'] === 403, 'Cliente nao edita empresa');
+    $pw('helena@cti.demo');
+    check(req('PATCH', '/api/clients/1', ['city' => 'Curitiba'])['status'] === 403 && req('DELETE', "/api/clients/$sem")['status'] === 403 && req('POST', "/api/clients/$sem/archive")['status'] === 403, 'Gestor nao edita, nao exclui e nao arquiva empresa');
+    $pw('marina@cti.demo');
+    check(req('PATCH', "/api/clients/$sem", ['city' => 'Olinda'])['status'] === 200, 'Supervisor edita empresa');
+    $loginNova = (int)$eOne("SELECT id FROM users WHERE email='editada@cti.demo'")['id'];
+    $delC = req('DELETE', "/api/clients/$nova");
+    check($delC['status'] === 200 && $eOne('SELECT id FROM clients WHERE id=?', [$nova]) === null && $eOne('SELECT id FROM users WHERE id=?', [$loginNova]) === null, 'Excluir empresa sem historico apaga a empresa e o login');
+    check((int)$eOne("SELECT COUNT(*) c FROM audit_events WHERE event='client_deleted' AND user_id=2")['c'] === 1 && (int)$eOne("SELECT COUNT(*) c FROM audit_events WHERE event='user_deleted' AND target_user_id=?", [$loginNova])['c'] === 1, 'Exclusao da empresa fica na auditoria, com o login como alvo');
+    check(req('DELETE', "/api/clients/$sem")['status'] === 200 && $eOne('SELECT id FROM clients WHERE id=?', [$sem]) === null, 'Empresa sem login e sem historico tambem e excluida');
+    $histC = req('DELETE', '/api/clients/1');
+    check($histC['status'] === 409 && $histC['body']['message'] === 'Esta empresa tem historico. Use arquivar.' && $eOne('SELECT id FROM clients WHERE id=1') !== null && $eOne('SELECT id FROM users WHERE id=4') !== null, 'Empresa com historico responde 409 e continua la com o login');
+    $viaLogin = req('POST', '/api/clients', $loc + ['name' => 'Historico Pelo Login', 'email' => 'hist.login@cti.demo'])['body']['data']['id'];
+    $e->exec("INSERT INTO audit_events(user_id,event,created_at) VALUES ((SELECT id FROM users WHERE email='hist.login@cti.demo'),'client_confirmed','2026-01-01T10:00:00+00:00')");
+    check(($rowOf(req('GET', '/api/bootstrap')['body']['data']['clients'], $viaLogin)['has_history'] ?? null) === true && req('DELETE', "/api/clients/$viaLogin")['status'] === 409, 'Historico do login conta como historico da empresa');
+    $openC = req('POST', '/api/clients/1/archive');
+    check($openC['status'] === 409 && str_contains($openC['body']['message'], 'atendimentos em aberto') && (int)$eOne('SELECT archived FROM clients WHERE id=1')['archived'] === 0, 'Arquivar empresa com atendimento em aberto responde 409');
+    $e->prepare("INSERT INTO tickets(protocol,client_id,attendant_id,team_id,subject,channel,status,created_at,response_due_at) VALUES ('ATD-ARQ-0001',?,1,1,'Aguardando a empresa','Portal','awaiting_feedback','2026-01-01T10:00:00+00:00','2026-01-01T14:00:00+00:00')")->execute([$viaLogin]);
+    check(req('POST', "/api/clients/$viaLogin/archive")['status'] === 409, 'Atendimento aguardando a empresa tambem bloqueia o arquivamento');
+    $e->exec("UPDATE tickets SET status='resolved' WHERE protocol='ATD-ARQ-0001'");
+    $arcC = req('POST', "/api/clients/$viaLogin/archive");
+    $arcLogin = $eOne("SELECT active,archived FROM users WHERE email='hist.login@cti.demo'");
+    check($arcC['status'] === 200 && (int)$eOne('SELECT archived FROM clients WHERE id=?', [$viaLogin])['archived'] === 1 && (int)$arcLogin['archived'] === 1 && (int)$arcLogin['active'] === 0, 'Arquivar empresa sem atendimento aberto arquiva a empresa e o login');
+    $arcBoot = req('GET', '/api/bootstrap')['body']['data'];
+    check($rowOf($arcBoot['clients'], $viaLogin) === null && (array_values(array_filter($arcBoot['tickets'], fn($t) => $t['protocol'] === 'ATD-ARQ-0001'))[0]['client_name'] ?? null) === 'Historico Pelo Login', 'Empresa arquivada some da lista e o nome continua no atendimento antigo');
+    check((int)$eOne("SELECT COUNT(*) c FROM audit_events WHERE event='client_archived' AND user_id=2")['c'] === 1, 'Arquivamento da empresa fica na auditoria');
+    check(req('POST', "/api/clients/$viaLogin/archive")['status'] === 404 && req('DELETE', "/api/clients/$viaLogin")['status'] === 404, 'Empresa ja arquivada responde 404');
+    check($pw('hist.login@cti.demo')['status'] === 401, 'Login da empresa arquivada deixa de entrar');
+
+    // E5: seed com login para todas as empresas (base nova)
+    $app = new App(new PDO('sqlite:' . $nDir . '/seed-logins.sqlite'), $nDir . '/seed-logins-storage');
+    $app->initialize();
+    $s5 = $app->db();
+    $perClient = $s5->query("SELECT c.id,(SELECT COUNT(*) FROM users u WHERE u.client_id=c.id AND u.role='client') n FROM clients c ORDER BY c.id")->fetchAll(PDO::FETCH_KEY_PAIR);
+    check((int)$s5->query('SELECT COUNT(*) FROM users')->fetchColumn() === 13 && count($perClient) === 6 && array_unique(array_map('intval', $perClient)) === [1 => 1], 'Banco novo tem 13 usuarios e cada uma das 6 empresas tem exatamente um login');
+    check($pw('patricia@cti.demo')['status'] === 200, 'Patricia, da Clinica Vida Plena, entra com a senha padrao');
+    $pBoot = req('GET', '/api/bootstrap')['body']['data'];
+    check(array_column($pBoot['clients'], 'name') === ['Clinica Vida Plena'] && $pBoot['tickets'] !== [] && array_unique(array_column($pBoot['tickets'], 'client_id')) === [3], 'Patricia so ve a Clinica Vida Plena e os atendimentos dela');
+    unset($s5);
 
     $app = $prevApp;
     unset($n, $prevApp);

@@ -65,7 +65,7 @@ final class App {
         foreach(['analysis_status'=>"TEXT NOT NULL DEFAULT 'not_required'",'analysis_error'=>'TEXT','analysis_attempts'=>'INTEGER NOT NULL DEFAULT 0','analysis_started_at'=>'TEXT','analyzed_at'=>'TEXT','transcript'=>'TEXT','confidence'=>'REAL','topics'=>'TEXT','evidence'=>'TEXT','analysis_model'=>'TEXT','transcription_model'=>'TEXT','original_sentiment'=>'TEXT','original_criticality'=>'TEXT','original_summary'=>'TEXT'] as $name=>$type){
             if(!in_array($name,$columns,true)){$this->pdo->exec("ALTER TABLE feedbacks ADD COLUMN $name $type");}
         }
-        $added=['tickets'=>['priority'=>"TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low','medium','high','critical'))",'support_level'=>'INTEGER NOT NULL DEFAULT 1 CHECK(support_level BETWEEN 1 AND 3)'],'clients'=>['city'=>'TEXT','state'=>'TEXT'],'users'=>['active'=>'INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1))'],'audit_events'=>['target_user_id'=>'INTEGER']];
+        $added=['tickets'=>['priority'=>"TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low','medium','high','critical'))",'support_level'=>'INTEGER NOT NULL DEFAULT 1 CHECK(support_level BETWEEN 1 AND 3)'],'clients'=>['city'=>'TEXT','state'=>'TEXT','archived'=>'INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1))'],'users'=>['active'=>'INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1))','archived'=>'INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1))'],'audit_events'=>['target_user_id'=>'INTEGER']];
         foreach($added as $table=>$fields){
             $present=array_column($this->all("PRAGMA table_info($table)"),'name');
             foreach($fields as $name=>$type){if(!in_array($name,$present,true)){$this->pdo->exec("ALTER TABLE $table ADD COLUMN $name $type");}}
@@ -80,10 +80,10 @@ final class App {
         $this->pdo->beginTransaction();
         try {
             foreach ([1 => 'Conectividade', 2 => 'Cloud e seguranca'] as $id => $name) { $this->run('INSERT INTO teams VALUES (?,?)', [$id,$name]); }
-            foreach ([1 => ['Grupo Aurora Logistica','Curitiba','PR'], 2 => ['Redecom Telecom','Belo Horizonte','MG'], 3 => ['Clinica Vida Plena','Porto Alegre','RS'], 4 => ['Mercado Bom Preco','Salvador','BA'], 5 => ['Escritorio Campos e Lima','Campinas','SP'], 6 => ['Industria Metalurgica Brasil','Joinville','SC']] as $id => [$name,$city,$state]) { $this->run('INSERT INTO clients VALUES (?,?,?,?)', [$id,$name,$city,$state]); }
+            foreach ([1 => ['Grupo Aurora Logistica','Curitiba','PR'], 2 => ['Redecom Telecom','Belo Horizonte','MG'], 3 => ['Clinica Vida Plena','Porto Alegre','RS'], 4 => ['Mercado Bom Preco','Salvador','BA'], 5 => ['Escritorio Campos e Lima','Campinas','SP'], 6 => ['Industria Metalurgica Brasil','Joinville','SC']] as $id => [$name,$city,$state]) { $this->run('INSERT INTO clients(id,name,city,state) VALUES (?,?,?,?)', [$id,$name,$city,$state]); }
             foreach ([1 => 'Acesso VPN', 2 => 'Conexao e link dedicado', 3 => 'Cloud e backup', 4 => 'Firewall e seguranca'] as $id => $name) { $this->run('INSERT INTO categories VALUES (?,?)', [$id,$name]); }
             $hash = password_hash('CtiDemo2026!', PASSWORD_DEFAULT);
-            $users = [[1,'Rafael Moreira','rafael@cti.demo','attendant',1,null],[2,'Marina Duarte','marina@cti.demo','supervisor',1,null],[3,'Helena Albuquerque','helena@cti.demo','manager',null,null],[4,'Lucas Ferreira','lucas@cti.demo','client',null,1],[5,'Bruno Ferraz','bruno@cti.demo','attendant',1,null],[6,'Camila Torres','camila@cti.demo','attendant',2,null],[7,'Leticia Almeida','leticia@cti.demo','attendant',2,null],[8,'Diego Martins','diego@cti.demo','supervisor',2,null],[9,'Ana Santos','ana@cti.demo','client',null,2]];
+            $users = [[1,'Rafael Moreira','rafael@cti.demo','attendant',1,null],[2,'Marina Duarte','marina@cti.demo','supervisor',1,null],[3,'Helena Albuquerque','helena@cti.demo','manager',null,null],[4,'Lucas Ferreira','lucas@cti.demo','client',null,1],[5,'Bruno Ferraz','bruno@cti.demo','attendant',1,null],[6,'Camila Torres','camila@cti.demo','attendant',2,null],[7,'Leticia Almeida','leticia@cti.demo','attendant',2,null],[8,'Diego Martins','diego@cti.demo','supervisor',2,null],[9,'Ana Santos','ana@cti.demo','client',null,2],[10,'Patricia Rocha','patricia@cti.demo','client',null,3],[11,'Joao Pereira','joao@cti.demo','client',null,4],[12,'Renata Campos','renata@cti.demo','client',null,5],[13,'Marcos Vieira','marcos@cti.demo','client',null,6]];
             foreach ($users as [$id,$name,$email,$role,$team,$client]) { $this->run('INSERT INTO users(id,name,email,password_hash,role,team_id,client_id) VALUES (?,?,?,?,?,?,?)', [$id,$name,$email,$hash,$role,$team,$client]); }
             $examples = [
                 ['Instabilidade na VPN site a site',1,'Renovar as credenciais do tunel VPN, conferir rotas e validar a conexao com o cliente.','VPN,acesso,credencial'],
@@ -217,9 +217,15 @@ final class App {
             $user = $this->user();
             if ($path === '/api/bootstrap' && $method === 'GET') { return $this->bootstrap($user); }
             if ($path === '/api/clients' && $method === 'POST') { return $this->createClient($user,$body); }
+            if (preg_match('#^/api/clients/(\d+)$#',$path,$m) && $method === 'PATCH') { return $this->editClient($user,(int)$m[1],$body); }
+            if (preg_match('#^/api/clients/(\d+)$#',$path,$m) && $method === 'DELETE') { return $this->removeClient($user,(int)$m[1],false); }
+            if (preg_match('#^/api/clients/(\d+)/archive$#',$path,$m) && $method === 'POST') { return $this->removeClient($user,(int)$m[1],true); }
             if ($path === '/api/users' && $method === 'GET') { return $this->listUsers($user); }
             if ($path === '/api/users' && $method === 'POST') { return $this->createUser($user,$body); }
             if (preg_match('#^/api/users/(\d+)/(deactivate|reactivate)$#',$path,$m) && $method === 'POST') { return $this->setUserActive($user,(int)$m[1],$m[2]==='reactivate'); }
+            if (preg_match('#^/api/users/(\d+)$#',$path,$m) && $method === 'PATCH') { return $this->editUser($user,(int)$m[1],$body); }
+            if (preg_match('#^/api/users/(\d+)$#',$path,$m) && $method === 'DELETE') { return $this->removeUser($user,(int)$m[1],false); }
+            if (preg_match('#^/api/users/(\d+)/archive$#',$path,$m) && $method === 'POST') { return $this->removeUser($user,(int)$m[1],true); }
             if ($path === '/api/tickets' && $method === 'POST') { return $this->createTicket($user,$body); }
             if (preg_match('#^/api/tickets/(\d+)$#',$path,$m) && $method === 'PATCH') { return $this->editTicket($user,(int)$m[1],$body); }
             if (preg_match('#^/api/tickets/(\d+)/(solution|reply|cases|retry|escalate)$#',$path,$m)) {
@@ -310,7 +316,11 @@ final class App {
         $tickets=$this->all($this->ticketSelect()." WHERE $scope ORDER BY t.id DESC",$params);
         foreach($tickets as &$ticket){$ticket['replies']=$this->replies($u,(int)$ticket['id']);}unset($ticket);
         $feedbacks=array_map(fn($r)=>$this->publicFeedback($r),$this->all($this->feedbackSelect()." WHERE $scope ORDER BY f.id DESC",$params));
-        $clients=$u['role']==='client'?$this->all('SELECT id,name,city,state FROM clients WHERE id=?',[$u['client_id']]):$this->all('SELECT id,name,city,state FROM clients ORDER BY name');
+        $clients=match($u['role']) {
+            'client'=>$this->all('SELECT id,name,city,state FROM clients WHERE id=?',[$u['client_id']]),
+            'manager'=>$this->all('SELECT id,name,city,state FROM clients WHERE archived=0 ORDER BY name'),
+            default=>$this->clientRows('c.archived=0')
+        };
         $teams=$u['role']==='manager'?$this->all('SELECT id,name FROM teams'):$this->all('SELECT id,name FROM teams WHERE id=?',[$u['team_id']??0]);
         $notifications=[];
         foreach ($tickets as $t) {
@@ -376,10 +386,78 @@ final class App {
         $this->run('INSERT INTO users(name,email,password_hash,role,team_id,client_id,active) VALUES (?,?,?,?,?,?,1)',[$name,$email,password_hash(self::DEFAULT_PASSWORD,PASSWORD_DEFAULT),$role,$team,$client]);
         return (int)$this->pdo->lastInsertId();
     }
+    // Historico e o que impede apagar: atendimento, revisao, resposta ou auditoria feita pela conta.
+    private function userHistory(string $alias): string {
+        return "(EXISTS(SELECT 1 FROM tickets WHERE attendant_id=$alias.id) OR EXISTS(SELECT 1 FROM reviews WHERE reviewer_id=$alias.id) OR EXISTS(SELECT 1 FROM ticket_replies WHERE user_id=$alias.id) OR EXISTS(SELECT 1 FROM audit_events WHERE user_id=$alias.id))";
+    }
+    private function clientHistory(string $alias): string {
+        return "(EXISTS(SELECT 1 FROM tickets WHERE client_id=$alias.id) OR EXISTS(SELECT 1 FROM users lu WHERE lu.client_id=$alias.id AND ".$this->userHistory('lu').'))';
+    }
+    private function clientRows(string $where,array $params=[]): array {
+        return array_map(fn($c)=>array_merge($c,['has_history'=>(bool)$c['has_history']]),$this->all("SELECT c.id,c.name,c.city,c.state,(SELECT email FROM users WHERE client_id=c.id AND role='client' AND archived=0 ORDER BY id LIMIT 1) login_email,".$this->clientHistory('c')." has_history FROM clients c WHERE $where ORDER BY c.name",$params));
+    }
+    private function activeClient(int $id): array {
+        $c=$this->one('SELECT * FROM clients WHERE id=? AND archived=0',[$id]);
+        if (!$c) { $this->fail(404,'Cliente nao encontrado.'); }
+        return $c;
+    }
+    private function editClient(array $u,int $id,array $b): array {
+        if (!in_array($u['role'],['attendant','supervisor'],true)) { $this->fail(403,'Somente atendentes e supervisores editam clientes.'); }
+        $c=$this->activeClient($id);
+        if (array_diff(array_keys($b),['name','city','state','email'])) { $this->fail(422,'Altere apenas nome, cidade, UF e e-mail do cliente.'); }
+        if (!$b) { $this->fail(422,'Informe os dados que deseja atualizar.'); }
+        $name=array_key_exists('name',$b)?$this->string($b,'name',3,120):$c['name'];
+        $city=$c['city'];
+        if (array_key_exists('city',$b)) { $city=is_string($b['city'])?trim($b['city']):''; if (mb_strlen($city)<2||mb_strlen($city)>80) { $this->fail(400,'Informe a cidade do cliente, de 2 a 80 caracteres.'); } }
+        $state=$c['state'];
+        if (array_key_exists('state',$b)) { $state=is_string($b['state'])?strtoupper(trim($b['state'])):''; if (!in_array($state,self::STATES,true)) { $this->fail(400,'Informe uma UF valida para o cliente.'); } }
+        $email=array_key_exists('email',$b)?$this->email($b['email'],'Informe um e-mail valido para o acesso da empresa.'):null;
+        $duplicate='Cliente ja cadastrado com esse nome.';
+        $this->pdo->exec('BEGIN IMMEDIATE');
+        try {
+            foreach ($this->all('SELECT name FROM clients WHERE id<>?',[$id]) as $other) { if (mb_strtolower($other['name'])===mb_strtolower($name)) { $this->fail(409,$duplicate); } }
+            $login=$this->one("SELECT * FROM users WHERE client_id=? AND role='client' AND archived=0 ORDER BY id LIMIT 1",[$id]);
+            if ($email!==null && !$login) { $this->fail(422,'Esta empresa nao tem acesso a plataforma.'); }
+            if ($email!==null && $this->one('SELECT id FROM users WHERE lower(email)=? AND id<>?',[$email,$login['id']])) { $this->fail(409,'Este e-mail ja tem acesso a plataforma.'); }
+            $this->run('UPDATE clients SET name=?,city=?,state=? WHERE id=?',[$name,$city,$state,$id]);
+            // O login criado pelo cadastro leva o nome da empresa; login com nome de pessoa fica como esta.
+            if ($login) { $this->run('UPDATE users SET name=?,email=? WHERE id=?',[$login['name']===$c['name']?$name:$login['name'],$email??$login['email'],$login['id']]); }
+            $this->audit($u['id'],null,'client_updated');
+            $this->pdo->exec('COMMIT');
+        } catch (\PDOException $e) {
+            $this->pdo->exec('ROLLBACK');
+            if ($e->getCode()==='23000') { $this->fail(409,$duplicate); }
+            throw $e;
+        } catch (Throwable $e) { $this->pdo->exec('ROLLBACK'); throw $e; }
+        return $this->ok($this->clientRows('c.id=?',[$id])[0]);
+    }
+    // Arquivar tira a empresa da equipe inteira, por isso so o supervisor exclui ou arquiva.
+    private function removeClient(array $u,int $id,bool $archive): array {
+        if ($u['role']!=='supervisor') { $this->fail(403,'Somente supervisores excluem ou arquivam clientes.'); }
+        $this->activeClient($id);
+        $this->pdo->exec('BEGIN IMMEDIATE');
+        try {
+            $logins=array_column($this->all('SELECT id FROM users WHERE client_id=? AND archived=0',[$id]),'id');
+            if ($archive) {
+                // Com atendimento aberto ou aguardando, o cliente perderia como responder.
+                if ((int)$this->run("SELECT COUNT(*) FROM tickets WHERE client_id=? AND status IN ('active','awaiting_feedback')",[$id])->fetchColumn()>0) { $this->fail(409,'Esta empresa tem atendimentos em aberto. Conclua-os antes de arquivar.'); }
+                $this->run('UPDATE clients SET archived=1 WHERE id=?',[$id]);
+                $this->run('UPDATE users SET archived=1,active=0 WHERE client_id=?',[$id]);
+            } else {
+                if ((int)$this->one('SELECT '.$this->clientHistory('clients').' h FROM clients WHERE id=?',[$id])['h']) { $this->fail(409,'Esta empresa tem historico. Use arquivar.'); }
+                $this->run('DELETE FROM users WHERE client_id=?',[$id]);
+                $this->run('DELETE FROM clients WHERE id=?',[$id]);
+            }
+            $this->audit($u['id'],null,$archive?'client_archived':'client_deleted');
+            foreach ($logins as $login) { $this->audit($u['id'],null,$archive?'user_archived':'user_deleted',(int)$login); }
+            $this->pdo->exec('COMMIT');
+        } catch (Throwable $e) { $this->pdo->exec('ROLLBACK'); throw $e; }
+        return $this->ok(['id'=>$id]);
+    }
     private function listUsers(array $u): array {
-        if ($u['role']==='manager') { return $this->ok($this->all("SELECT id,name,email,team_id,active FROM users WHERE role='supervisor' ORDER BY id")); }
-        if ($u['role']==='supervisor') { return $this->ok($this->all("SELECT id,name,email,team_id,active FROM users WHERE role='attendant' AND team_id=? ORDER BY id",[$u['team_id']])); }
-        $this->fail(403,'Somente gestores e supervisores gerenciam usuarios.');
+        if (!in_array($u['role'],['manager','supervisor'],true)) { $this->fail(403,'Somente gestores e supervisores gerenciam usuarios.'); }
+        $rows=$u['role']==='manager'?$this->all("SELECT id,name,email,team_id,active,".$this->userHistory('users')." has_history FROM users WHERE role='supervisor' AND archived=0 ORDER BY id"):$this->all("SELECT id,name,email,team_id,active,".$this->userHistory('users')." has_history FROM users WHERE role='attendant' AND team_id=? AND archived=0 ORDER BY id",[$u['team_id']]);
+        return $this->ok(array_map(fn($r)=>array_merge($r,['has_history'=>(bool)$r['has_history']]),$rows));
     }
     private function createUser(array $u,array $b): array {
         if (!in_array($u['role'],['manager','supervisor'],true)) { $this->fail(403,'Somente gestores e supervisores gerenciam usuarios.'); }
@@ -404,7 +482,7 @@ final class App {
     }
     private function setUserActive(array $u,int $id,bool $active): array {
         if (!in_array($u['role'],['manager','supervisor'],true)) { $this->fail(403,'Somente gestores e supervisores gerenciam usuarios.'); }
-        $target=$this->one('SELECT * FROM users WHERE id=?',[$id]);
+        $target=$this->one('SELECT * FROM users WHERE id=? AND archived=0',[$id]);
         if (!$target) { $this->fail(404,'Usuario nao encontrado.'); }
         if ((int)$target['id']===(int)$u['id']) { $this->fail(403,'Voce nao pode alterar o proprio acesso.'); }
         $allowed=$u['role']==='manager'?$target['role']==='supervisor':($target['role']==='attendant' && (int)$target['team_id']===(int)$u['team_id']);
@@ -420,9 +498,58 @@ final class App {
         } catch (Throwable $e) { $this->pdo->exec('ROLLBACK'); throw $e; }
         return $this->ok($this->one('SELECT id,name,email,team_id,active FROM users WHERE id=?',[$id]));
     }
+    // Mesma matriz de desativar: gestor sobre supervisores, supervisor sobre atendentes da equipe, ninguem sobre si.
+    private function managedUser(array $u,int $id): array {
+        if (!in_array($u['role'],['manager','supervisor'],true)) { $this->fail(403,'Somente gestores e supervisores gerenciam usuarios.'); }
+        $target=$this->one('SELECT * FROM users WHERE id=? AND archived=0',[$id]);
+        if (!$target) { $this->fail(404,'Usuario nao encontrado.'); }
+        if ((int)$target['id']===(int)$u['id']) { $this->fail(403,'Voce nao pode alterar o proprio acesso.'); }
+        $allowed=$u['role']==='manager'?$target['role']==='supervisor':($target['role']==='attendant' && (int)$target['team_id']===(int)$u['team_id']);
+        if (!$allowed) { $this->fail(403,'Voce nao gerencia este usuario.'); }
+        return $target;
+    }
+    private function editUser(array $u,int $id,array $b): array {
+        $target=$this->managedUser($u,$id);
+        $manager=$u['role']==='manager';
+        if (array_diff(array_keys($b),$manager?['name','email','team_id']:['name','email'])) { $this->fail(422,$manager?'Altere apenas nome, e-mail e equipe do supervisor.':'Altere apenas nome e e-mail do atendente.'); }
+        if (!$b) { $this->fail(422,'Informe os dados que deseja atualizar.'); }
+        $name=array_key_exists('name',$b)?$this->string($b,'name',3,120):$target['name'];
+        $email=array_key_exists('email',$b)?$this->email($b['email'],'Informe um e-mail valido.'):$target['email'];
+        $team=(int)$target['team_id'];
+        if (array_key_exists('team_id',$b)) {
+            $team=filter_var($b['team_id'],FILTER_VALIDATE_INT);
+            if ($team===false || !$this->one('SELECT id FROM teams WHERE id=?',[$team])) { $this->fail(400,'Escolha uma equipe existente.'); }
+        }
+        $this->pdo->exec('BEGIN IMMEDIATE');
+        try {
+            if ($this->one('SELECT id FROM users WHERE lower(email)=? AND id<>?',[$email,$id])) { $this->fail(409,'Este e-mail ja tem acesso a plataforma.'); }
+            if ($team!==(int)$target['team_id'] && (int)$target['active']===1 && (int)$this->run("SELECT COUNT(*) FROM users WHERE role='supervisor' AND active=1 AND team_id=? AND id<>?",[$target['team_id'],$id])->fetchColumn()===0) { $this->fail(409,'A equipe ficaria sem supervisor ativo.'); }
+            $this->run('UPDATE users SET name=?,email=?,team_id=? WHERE id=?',[$name,$email,$team,$id]);
+            $this->audit($u['id'],null,'user_updated',$id);
+            $this->pdo->exec('COMMIT');
+        } catch (Throwable $e) { $this->pdo->exec('ROLLBACK'); throw $e; }
+        return $this->ok($this->one('SELECT id,name,email,team_id,active FROM users WHERE id=?',[$id]));
+    }
+    // Excluir e arquivar seguem as guardas de desativar; so apaga de verdade quem nunca participou de atendimento.
+    private function removeUser(array $u,int $id,bool $archive): array {
+        $target=$this->managedUser($u,$id);
+        $this->pdo->exec('BEGIN IMMEDIATE');
+        try {
+            if ($target['role']==='supervisor' && (int)$this->run("SELECT COUNT(*) FROM users WHERE role='supervisor' AND active=1 AND team_id=? AND id<>?",[$target['team_id'],$id])->fetchColumn()===0) { $this->fail(409,'A equipe ficaria sem supervisor ativo.'); }
+            if ($target['role']==='attendant' && (int)$this->run("SELECT COUNT(*) FROM tickets WHERE attendant_id=? AND status='active'",[$id])->fetchColumn()>0) { $this->fail(409,'Este atendente tem atendimentos em aberto. Conclua-os antes de '.($archive?'arquivar.':'excluir.')); }
+            if ($archive) { $this->run('UPDATE users SET archived=1,active=0 WHERE id=?',[$id]); }
+            else {
+                if ((int)$this->one('SELECT '.$this->userHistory('users').' h FROM users WHERE id=?',[$id])['h']) { $this->fail(409,'Esta conta tem historico. Use arquivar.'); }
+                $this->run('DELETE FROM users WHERE id=?',[$id]);
+            }
+            $this->audit($u['id'],null,$archive?'user_archived':'user_deleted',$id);
+            $this->pdo->exec('COMMIT');
+        } catch (Throwable $e) { $this->pdo->exec('ROLLBACK'); throw $e; }
+        return $this->ok($archive?$this->one('SELECT id,name,email,team_id,active FROM users WHERE id=?',[$id]):['id'=>$id]);
+    }
     private function createTicket(array $u,array $b): array {
         $this->attendant($u); $subject=$this->string($b,'subject',5,180); $channel=$this->channel($b['channel']??null); $priority=$this->priority($b['priority']??null);
-        if (!$this->one('SELECT id FROM clients WHERE id=?',[$b['client_id']??0])) { $this->fail(422,'Selecione um cliente cadastrado.'); }
+        if (!$this->one('SELECT id FROM clients WHERE id=? AND archived=0',[$b['client_id']??0])) { $this->fail(422,'Selecione um cliente cadastrado.'); }
         $category=isset($b['category_id']) && $b['category_id']!==''?(int)$b['category_id']:null;
         if ($category && !$this->one('SELECT id FROM categories WHERE id=?',[$category])) { $this->fail(422,'Categoria invalida.'); }
         $status='active'; $solution=null;
