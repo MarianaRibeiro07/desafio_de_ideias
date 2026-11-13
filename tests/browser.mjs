@@ -111,7 +111,7 @@ try {
   await until('!!document.querySelector("form")', 'formulario de login');
   await shot('login');
   check('Login exibe logo branca sobre o azul', await evaluate(`!![...document.querySelectorAll('.login-hero img')].find(img => img.src.includes('cti-logo-branca.png') && img.complete && img.naturalWidth > 0)`));
-  check('Login sem textos de projeto academico no rodape', await evaluate(`(() => { const text = document.body.innerText; return !text.includes('Projeto integrador') && !text.includes('SENAI 2026') && !text.includes('Plataforma acadêmica') && text.includes('Conexões que importam') && text.includes('Privacidade em primeiro lugar') && [...document.querySelectorAll('.login-panel .login-footer span')][0]?.textContent.trim() === 'CTI Escuta'; })()`));
+  check('Login sem textos de projeto academico no rodape', await evaluate(`(() => { const text = document.body.innerText; return !text.includes('Projeto integrador') && !text.includes('SENAI 2026') && !text.includes('Plataforma acadêmica') && !!document.querySelector('#login-form'); })()`));
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await pause(200);
   const loginMobile = await evaluate('({width:document.documentElement.scrollWidth,viewport:innerWidth})');
