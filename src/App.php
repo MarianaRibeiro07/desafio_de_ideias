@@ -65,7 +65,7 @@ final class App {
         foreach(['analysis_status'=>"TEXT NOT NULL DEFAULT 'not_required'",'analysis_error'=>'TEXT','analysis_attempts'=>'INTEGER NOT NULL DEFAULT 0','analysis_started_at'=>'TEXT','analyzed_at'=>'TEXT','transcript'=>'TEXT','confidence'=>'REAL','topics'=>'TEXT','evidence'=>'TEXT','analysis_model'=>'TEXT','transcription_model'=>'TEXT','original_sentiment'=>'TEXT','original_criticality'=>'TEXT','original_summary'=>'TEXT'] as $name=>$type){
             if(!in_array($name,$columns,true)){$this->pdo->exec("ALTER TABLE feedbacks ADD COLUMN $name $type");}
         }
-        $added=['tickets'=>['priority'=>"TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low','medium','high','critical'))",'support_level'=>'INTEGER NOT NULL DEFAULT 1 CHECK(support_level BETWEEN 1 AND 3)'],'clients'=>['city'=>'TEXT','state'=>'TEXT']];
+        $added=['tickets'=>['priority'=>"TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low','medium','high','critical'))",'support_level'=>'INTEGER NOT NULL DEFAULT 1 CHECK(support_level BETWEEN 1 AND 3)'],'clients'=>['city'=>'TEXT','state'=>'TEXT'],'users'=>['active'=>'INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1))'],'audit_events'=>['target_user_id'=>'INTEGER']];
         foreach($added as $table=>$fields){
             $present=array_column($this->all("PRAGMA table_info($table)"),'name');
             foreach($fields as $name=>$type){if(!in_array($name,$present,true)){$this->pdo->exec("ALTER TABLE $table ADD COLUMN $name $type");}}
@@ -84,7 +84,7 @@ final class App {
             foreach ([1 => 'Acesso VPN', 2 => 'Conexao e link dedicado', 3 => 'Cloud e backup', 4 => 'Firewall e seguranca'] as $id => $name) { $this->run('INSERT INTO categories VALUES (?,?)', [$id,$name]); }
             $hash = password_hash('CtiDemo2026!', PASSWORD_DEFAULT);
             $users = [[1,'Rafael Moreira','rafael@cti.demo','attendant',1,null],[2,'Marina Duarte','marina@cti.demo','supervisor',1,null],[3,'Helena Albuquerque','helena@cti.demo','manager',null,null],[4,'Lucas Ferreira','lucas@cti.demo','client',null,1],[5,'Bruno Ferraz','bruno@cti.demo','attendant',1,null],[6,'Camila Torres','camila@cti.demo','attendant',2,null],[7,'Leticia Almeida','leticia@cti.demo','attendant',2,null],[8,'Diego Martins','diego@cti.demo','supervisor',2,null],[9,'Ana Santos','ana@cti.demo','client',null,2]];
-            foreach ($users as [$id,$name,$email,$role,$team,$client]) { $this->run('INSERT INTO users VALUES (?,?,?,?,?,?,?)', [$id,$name,$email,$hash,$role,$team,$client]); }
+            foreach ($users as [$id,$name,$email,$role,$team,$client]) { $this->run('INSERT INTO users(id,name,email,password_hash,role,team_id,client_id) VALUES (?,?,?,?,?,?,?)', [$id,$name,$email,$hash,$role,$team,$client]); }
             $examples = [
                 ['Instabilidade na VPN site a site',1,'Renovar as credenciais do tunel VPN, conferir rotas e validar a conexao com o cliente.','VPN,acesso,credencial'],
                 ['Queda intermitente no link dedicado',2,'Verificar logs de oscilacao, substituir o cabo da porta WAN e monitorar a estabilidade do link.','link,conexao,rede'],
@@ -217,6 +217,9 @@ final class App {
             $user = $this->user();
             if ($path === '/api/bootstrap' && $method === 'GET') { return $this->bootstrap($user); }
             if ($path === '/api/clients' && $method === 'POST') { return $this->createClient($user,$body); }
+            if ($path === '/api/users' && $method === 'GET') { return $this->listUsers($user); }
+            if ($path === '/api/users' && $method === 'POST') { return $this->createUser($user,$body); }
+            if (preg_match('#^/api/users/(\d+)/(deactivate|reactivate)$#',$path,$m) && $method === 'POST') { return $this->setUserActive($user,(int)$m[1],$m[2]==='reactivate'); }
             if ($path === '/api/tickets' && $method === 'POST') { return $this->createTicket($user,$body); }
             if (preg_match('#^/api/tickets/(\d+)$#',$path,$m) && $method === 'PATCH') { return $this->editTicket($user,(int)$m[1],$body); }
             if (preg_match('#^/api/tickets/(\d+)/(solution|reply|cases|retry|escalate)$#',$path,$m)) {
@@ -247,7 +250,7 @@ final class App {
 
     private function ok(mixed $data, int $status=200): array { return ['status'=>$status,'body'=>['data'=>$data],'headers'=>[]]; }
     private function user(bool $required=true): ?array {
-        $u=isset($_SESSION['user_id'])?$this->one('SELECT id,name,email,role,team_id,client_id FROM users WHERE id=?',[$_SESSION['user_id']]):null;
+        $u=isset($_SESSION['user_id'])?$this->one('SELECT id,name,email,role,team_id,client_id FROM users WHERE id=? AND active=1',[$_SESSION['user_id']]):null;
         if (!$u && $required) { $this->fail(401,'Entre na plataforma para continuar.'); }
         return $u;
     }
@@ -256,7 +259,7 @@ final class App {
         $identity=hash('sha256',$email.'|'.($_SERVER['REMOTE_ADDR']??'cli'));
         $cutoff=(new DateTimeImmutable('-15 minutes'))->setTimezone(new DateTimeZone('UTC'))->format(DATE_ATOM);
         if ((int)$this->run('SELECT COUNT(*) FROM login_attempts WHERE identity=? AND created_at>=?',[$identity,$cutoff])->fetchColumn() >= 10) { $this->fail(429,'Muitas tentativas. Aguarde 15 minutos.'); }
-        $user=$this->one('SELECT * FROM users WHERE email=?',[$email]);
+        $user=$this->one('SELECT * FROM users WHERE email=? AND active=1',[$email]);
         $valid=password_verify((string)($body['password']??''),$user['password_hash']??'$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi.');
         if (!$user || !$valid) { $this->run('INSERT INTO login_attempts(identity,created_at) VALUES (?,?)',[$identity,$this->now()]); $this->fail(401,'E-mail ou senha incorretos.'); }
         $this->run('DELETE FROM login_attempts WHERE identity=?',[$identity]);
@@ -321,7 +324,7 @@ final class App {
         $onDemand=getenv('CTI_ANALYSIS_PROVIDER')==='gemini';
         $remaining=0;
         if($onDemand){require_once __DIR__.'/AnalysisWorker.php';$used=(int)$this->run("SELECT COUNT(*) FROM audit_events WHERE event='gemini_request_reserved'")->fetchColumn();$remaining=max(0,AnalysisWorker::requestLimit()-$used);}
-        return $this->ok(['user'=>$u,'clients'=>$clients,'teams'=>$teams,'attendants'=>$this->all("SELECT id,name,team_id FROM users WHERE role='attendant'".($u['role']==='manager'?'':' AND team_id=?'),$u['role']==='manager'?[]:[$u['team_id']??0]),'categories'=>$this->all('SELECT * FROM categories'),'tickets'=>$tickets,'feedbacks'=>$feedbacks,'cases'=>$u['role']==='client'?[]:$this->cases($u,[]),'notifications'=>$notifications,'analysis'=>['on_demand'=>$onDemand,'remaining_requests'=>$remaining]]);
+        return $this->ok(['user'=>$u,'clients'=>$clients,'teams'=>$teams,'attendants'=>$this->all("SELECT id,name,team_id FROM users WHERE role='attendant' AND active=1".($u['role']==='manager'?'':' AND team_id=?'),$u['role']==='manager'?[]:[$u['team_id']??0]),'categories'=>$this->all('SELECT * FROM categories'),'tickets'=>$tickets,'feedbacks'=>$feedbacks,'cases'=>$u['role']==='client'?[]:$this->cases($u,[]),'notifications'=>$notifications,'analysis'=>['on_demand'=>$onDemand,'remaining_requests'=>$remaining]]);
     }
     private function attendant(array $u): void { if ($u['role']!=='attendant') { $this->fail(403,'Somente atendentes podem operar seus atendimentos.'); } }
     private function string(array $b,string $key,int $min,int $max): string {
@@ -336,7 +339,8 @@ final class App {
     }
     private function createClient(array $u,array $b): array {
         if (!in_array($u['role'],['attendant','supervisor'],true)) { $this->fail(403,'Somente atendentes e supervisores podem cadastrar clientes.'); }
-        if (array_diff(array_keys($b),['name','city','state'])) { $this->fail(422,'Informe apenas nome, cidade e UF do cliente.'); }
+        if (array_diff(array_keys($b),['name','city','state','email'])) { $this->fail(422,'Informe apenas nome, cidade, UF e e-mail do cliente.'); }
+        $email=array_key_exists('email',$b)?$this->email($b['email'],'Informe um e-mail valido para o acesso da empresa.'):null;
         $name=$this->string($b,'name',3,120);
         $city=isset($b['city'])&&is_string($b['city'])?trim($b['city']):'';
         if (mb_strlen($city)<2||mb_strlen($city)>80) { $this->fail(400,'Informe a cidade do cliente, de 2 a 80 caracteres.'); }
@@ -346,15 +350,75 @@ final class App {
         $this->pdo->exec('BEGIN IMMEDIATE');
         try {
             foreach ($this->all('SELECT name FROM clients') as $c) { if (mb_strtolower($c['name'])===mb_strtolower($name)) { $this->fail(409,$duplicate); } }
+            if ($email!==null) { $this->assertEmailFree($email); }
             $this->run('INSERT INTO clients(name,city,state) VALUES (?,?,?)',[$name,$city,$state]); $id=(int)$this->pdo->lastInsertId();
             $this->audit($u['id'],null,'client_created');
+            if ($email!==null) { $this->audit($u['id'],null,'user_created',$this->insertUser($name,$email,'client',null,$id)); }
             $this->pdo->exec('COMMIT');
         } catch (\PDOException $e) {
             $this->pdo->exec('ROLLBACK');
             if ($e->getCode()==='23000') { $this->fail(409,$duplicate); }
             throw $e;
         } catch (Throwable $e) { $this->pdo->exec('ROLLBACK'); throw $e; }
-        return $this->ok(['id'=>$id,'name'=>$name,'city'=>$city,'state'=>$state],201);
+        return $this->ok(['id'=>$id,'name'=>$name,'city'=>$city,'state'=>$state]+($email!==null?['login'=>['email'=>$email]]:[]),201);
+    }
+    // Senha padrao do MVP, decidida para a demonstracao; a versao final ativa a conta por convite no e-mail.
+    private const DEFAULT_PASSWORD = 'CtiDemo2026!';
+    private function email(mixed $value,string $message): string {
+        $email=is_string($value)?mb_strtolower(trim($value)):'';
+        if (mb_strlen($email)>254 || filter_var($email,FILTER_VALIDATE_EMAIL)===false) { $this->fail(400,$message); }
+        return $email;
+    }
+    private function assertEmailFree(string $email): void {
+        if ($this->one('SELECT id FROM users WHERE lower(email)=?',[$email])) { $this->fail(409,'Este e-mail ja tem acesso a plataforma.'); }
+    }
+    private function insertUser(string $name,string $email,string $role,?int $team,?int $client): int {
+        $this->run('INSERT INTO users(name,email,password_hash,role,team_id,client_id,active) VALUES (?,?,?,?,?,?,1)',[$name,$email,password_hash(self::DEFAULT_PASSWORD,PASSWORD_DEFAULT),$role,$team,$client]);
+        return (int)$this->pdo->lastInsertId();
+    }
+    private function listUsers(array $u): array {
+        if ($u['role']==='manager') { return $this->ok($this->all("SELECT id,name,email,team_id,active FROM users WHERE role='supervisor' ORDER BY id")); }
+        if ($u['role']==='supervisor') { return $this->ok($this->all("SELECT id,name,email,team_id,active FROM users WHERE role='attendant' AND team_id=? ORDER BY id",[$u['team_id']])); }
+        $this->fail(403,'Somente gestores e supervisores gerenciam usuarios.');
+    }
+    private function createUser(array $u,array $b): array {
+        if (!in_array($u['role'],['manager','supervisor'],true)) { $this->fail(403,'Somente gestores e supervisores gerenciam usuarios.'); }
+        $manager=$u['role']==='manager';
+        if (array_diff(array_keys($b),$manager?['name','email','team_id']:['name','email'])) { $this->fail(422,$manager?'Informe apenas nome, e-mail e equipe do supervisor.':'Informe apenas nome e e-mail do atendente.'); }
+        $name=$this->string($b,'name',3,120);
+        $email=$this->email($b['email']??null,'Informe um e-mail valido.');
+        $team=(int)$u['team_id'];
+        if ($manager) {
+            $team=filter_var($b['team_id']??null,FILTER_VALIDATE_INT);
+            if ($team===false || !$this->one('SELECT id FROM teams WHERE id=?',[$team])) { $this->fail(400,'Escolha uma equipe existente.'); }
+        }
+        $role=$manager?'supervisor':'attendant';
+        $this->pdo->exec('BEGIN IMMEDIATE');
+        try {
+            $this->assertEmailFree($email);
+            $id=$this->insertUser($name,$email,$role,$team,null);
+            $this->audit($u['id'],null,'user_created',$id);
+            $this->pdo->exec('COMMIT');
+        } catch (Throwable $e) { $this->pdo->exec('ROLLBACK'); throw $e; }
+        return $this->ok($this->one('SELECT id,name,email,team_id,active FROM users WHERE id=?',[$id]),201);
+    }
+    private function setUserActive(array $u,int $id,bool $active): array {
+        if (!in_array($u['role'],['manager','supervisor'],true)) { $this->fail(403,'Somente gestores e supervisores gerenciam usuarios.'); }
+        $target=$this->one('SELECT * FROM users WHERE id=?',[$id]);
+        if (!$target) { $this->fail(404,'Usuario nao encontrado.'); }
+        if ((int)$target['id']===(int)$u['id']) { $this->fail(403,'Voce nao pode alterar o proprio acesso.'); }
+        $allowed=$u['role']==='manager'?$target['role']==='supervisor':($target['role']==='attendant' && (int)$target['team_id']===(int)$u['team_id']);
+        if (!$allowed) { $this->fail(403,'Voce nao gerencia este usuario.'); }
+        $this->pdo->exec('BEGIN IMMEDIATE');
+        try {
+            if (!$active && $target['role']==='supervisor' && (int)$this->run("SELECT COUNT(*) FROM users WHERE role='supervisor' AND active=1 AND team_id=? AND id<>?",[$target['team_id'],$id])->fetchColumn()===0) { $this->fail(409,'A equipe ficaria sem supervisor ativo.'); }
+            // So o atendente responsavel envia a solucao e nao ha transferencia de atendimento.
+            if (!$active && $target['role']==='attendant' && (int)$this->run("SELECT COUNT(*) FROM tickets WHERE attendant_id=? AND status='active'",[$id])->fetchColumn()>0) { $this->fail(409,'Este atendente tem atendimentos em aberto. Conclua-os antes de desativar.'); }
+            $this->run('UPDATE users SET active=? WHERE id=?',[$active?1:0,$id]);
+            $this->audit($u['id'],null,$active?'user_reactivated':'user_deactivated',$id);
+            $this->pdo->exec('COMMIT');
+        } catch (Throwable $e) { $this->pdo->exec('ROLLBACK'); throw $e; }
+        return $this->ok($this->one('SELECT id,name,email,team_id,active FROM users WHERE id=?',[$id]));
     }
     private function createTicket(array $u,array $b): array {
         $this->attendant($u); $subject=$this->string($b,'subject',5,180); $channel=$this->channel($b['channel']??null); $priority=$this->priority($b['priority']??null);
@@ -509,7 +573,7 @@ final class App {
         $this->audit($u['id'],(int)$f['ticket_id'],'analysis_retried');
         return $this->ok($this->publicFeedback($this->feedbackById($u,(int)$f['id'])));
     }
-    private function audit(?int $user,?int $ticket,string $event): void {$this->run('INSERT INTO audit_events(user_id,ticket_id,event,created_at) VALUES (?,?,?,?)',[$user,$ticket,$event,$this->now()]);}
+    private function audit(?int $user,?int $ticket,string $event,?int $target=null): void {$this->run('INSERT INTO audit_events(user_id,ticket_id,event,created_at,target_user_id) VALUES (?,?,?,?,?)',[$user,$ticket,$event,$this->now(),$target]);}
 
     private function redactContent(int $id,string $stamp): bool {
         $updated=$this->run("UPDATE feedbacks SET text=NULL,audio_path=NULL,summary=NULL,transcript=NULL,topics=NULL,evidence=NULL,original_summary=NULL,analysis_error=NULL,analysis_status=CASE WHEN analysis_status IN ('pending','processing','failed') THEN 'not_required' ELSE analysis_status END,redacted_at=? WHERE id=? AND redacted_at IS NULL",[$stamp,$id]);

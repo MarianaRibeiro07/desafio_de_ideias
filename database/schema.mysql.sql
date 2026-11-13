@@ -18,6 +18,7 @@ CREATE TABLE users (
  role VARCHAR(20) NOT NULL CHECK(role IN ('attendant','supervisor','manager','client')),
  team_id BIGINT UNSIGNED NULL,
  client_id BIGINT UNSIGNED NULL,
+ active TINYINT NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
  FOREIGN KEY(team_id) REFERENCES teams(id),
  FOREIGN KEY(client_id) REFERENCES clients(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -133,8 +134,10 @@ CREATE TABLE audit_events (
  ticket_id BIGINT UNSIGNED NULL,
  event VARCHAR(60) NOT NULL,
  created_at VARCHAR(35) NOT NULL,
+ target_user_id BIGINT UNSIGNED NULL,
  FOREIGN KEY(user_id) REFERENCES users(id),
- FOREIGN KEY(ticket_id) REFERENCES tickets(id)
+ FOREIGN KEY(ticket_id) REFERENCES tickets(id),
+ FOREIGN KEY(target_user_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE login_attempts (
  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,

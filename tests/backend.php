@@ -638,6 +638,103 @@ try {
     check($oldRow === ['priority' => 'medium', 'support_level' => 1, 'response_due_at' => '2026-01-03T10:00:00+00:00'] && $oldClient === ['city' => null, 'state' => null], 'Migracao repetida e idempotente: atendimento antigo vira medium/N1 sem perder o prazo e cliente ganha city/state');
     unset($old);
 
+    // U: gestao de usuarios (base nova e isolada)
+    $app = new App(new PDO('sqlite:' . $nDir . '/users.sqlite'), $nDir . '/users-storage');
+    $app->initialize();
+    $u = $app->db();
+    $one = fn(string $sql, array $p = []) => (function () use ($u, $sql, $p) { $s = $u->prepare($sql); $s->execute($p); return $s->fetch(PDO::FETCH_ASSOC) ?: null; })();
+    $pw = fn(string $email, string $password = 'CtiDemo2026!') => (function () use ($email, $password) { $_SESSION = []; req('GET', '/api/session'); return req('POST', '/api/login', ['email' => $email, 'password' => $password]); })();
+
+    // U1: coluna active, migracao e bloqueio de acesso
+    $oldU = new PDO('sqlite:' . $nDir . '/old-users.sqlite');
+    $oldU->exec("CREATE TABLE teams (id INTEGER PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE clients (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+      CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL, team_id INTEGER, client_id INTEGER);
+      INSERT INTO teams VALUES (1,'T'); INSERT INTO users VALUES (1,'U','u@x.com','x','attendant',1,NULL),(2,'V','v@x.com','x','supervisor',1,NULL);");
+    for ($i = 0; $i < 2; $i++) { (new App($oldU, $nDir . '/old-users-storage'))->initialize(); }
+    check((int)$oldU->query('SELECT COUNT(*) FROM users WHERE active=1')->fetchColumn() === 2, 'Migracao repetida da coluna active deixa todos os usuarios existentes ativos');
+    check(in_array('target_user_id', array_column($oldU->query('PRAGMA table_info(audit_events)')->fetchAll(PDO::FETCH_ASSOC), 'name'), true), 'Migracao adiciona target_user_id na auditoria');
+    unset($oldU);
+    check((int)$u->query('SELECT COUNT(*) FROM users WHERE active=1')->fetchColumn() === 9, 'Base nova nasce com os 9 usuarios ativos');
+    check($pw('bruno@cti.demo')['status'] === 200, 'Bruno ativo entra');
+    $u->exec("UPDATE users SET active=0 WHERE email='bruno@cti.demo'");
+    check(req('GET', '/api/bootstrap')['status'] === 401, 'Sessao aberta de usuario desativado perde acesso na rota seguinte');
+    check(req('GET', '/api/session')['body']['data']['user'] === null, 'Sessao de usuario desativado nao devolve o usuario');
+    $denied = $pw('bruno@cti.demo'); $wrong = $pw('rafael@cti.demo', 'SenhaErrada1!');
+    check($denied['status'] === 401 && $denied['body']['message'] === $wrong['body']['message'], 'Login de desativado responde o mesmo 401 de senha errada');
+    $u->exec("UPDATE users SET active=1 WHERE email='bruno@cti.demo'");
+
+    // U2: cadastro de empresa cria o login dela
+    $pw('rafael@cti.demo');
+    $semLogin = req('POST', '/api/clients', $loc + ['name' => 'Empresa Sem Login']);
+    check($semLogin['status'] === 201 && array_keys($semLogin['body']['data']) === ['id', 'name', 'city', 'state'], 'Cadastro sem email mantem o contrato antigo');
+    $comLogin = req('POST', '/api/clients', $loc + ['name' => 'Nova Era Transportes', 'email' => '  Contato@NovaEra.com.br ']);
+    check($comLogin['status'] === 201 && ($comLogin['body']['data']['login'] ?? null) === ['email' => 'contato@novaera.com.br'], 'Cadastro com email cria a empresa e devolve o login');
+    $cid = $comLogin['body']['data']['id'];
+    $cu = $one('SELECT * FROM users WHERE email=?', ['contato@novaera.com.br']);
+    check($cu !== null && $cu['role'] === 'client' && (int)$cu['client_id'] === $cid && $cu['team_id'] === null && (int)$cu['active'] === 1 && $cu['name'] === 'Nova Era Transportes', 'Login da empresa nasce como cliente vinculado a ela');
+    check((int)$one("SELECT COUNT(*) c FROM audit_events WHERE event='user_created' AND target_user_id=?", [$cu['id']])['c'] === 1, 'Criacao do login da empresa fica na auditoria com alvo');
+    check($pw('contato@novaera.com.br')['status'] === 200 && req('GET', '/api/bootstrap')['body']['data']['user']['client_id'] === $cid, 'Empresa entra com a senha padrao e enxerga o proprio escopo');
+    $pw('rafael@cti.demo');
+    $clientsBefore = (int)$u->query('SELECT COUNT(*) FROM clients')->fetchColumn();
+    $dupMail = req('POST', '/api/clients', $loc + ['name' => 'Outra Empresa', 'email' => 'lucas@cti.demo']);
+    check($dupMail['status'] === 409 && $dupMail['body']['message'] === 'Este e-mail ja tem acesso a plataforma.' && (int)$u->query('SELECT COUNT(*) FROM clients')->fetchColumn() === $clientsBefore, 'Email ja usado responde 409 proprio e nao cria a empresa');
+    check(req('POST', '/api/clients', $loc + ['name' => 'Email Invalido SA', 'email' => 'nao-e-email'])['status'] === 400, 'Email invalido no cadastro de empresa responde 400');
+    $u->exec("CREATE TRIGGER falha_login BEFORE INSERT ON users WHEN NEW.email='falha@x.com' BEGIN SELECT RAISE(ABORT,'falha simulada'); END");
+    $rb = req('POST', '/api/clients', $loc + ['name' => 'Rollback Login SA', 'email' => 'falha@x.com']);
+    check($rb['status'] >= 400 && $one("SELECT id FROM clients WHERE name='Rollback Login SA'") === null, 'Falha ao criar o login desfaz a empresa');
+    $u->exec('DROP TRIGGER falha_login');
+
+    // U3: API de usuarios
+    $pw('helena@cti.demo');
+    $list = req('GET', '/api/users');
+    check($list['status'] === 200 && array_unique(array_map(fn($r) => $one('SELECT role FROM users WHERE id=?', [$r['id']])['role'], $list['body']['data'])) === ['supervisor'] && count($list['body']['data']) === 2 && array_keys($list['body']['data'][0]) === ['id', 'name', 'email', 'team_id', 'active'], 'Gestor lista os supervisores com os campos previstos');
+    $newSup = req('POST', '/api/users', ['name' => 'Paula Reis', 'email' => 'paula@cti.demo', 'team_id' => 2, 'role' => 'manager']);
+    $paula = $one('SELECT * FROM users WHERE email=?', ['paula@cti.demo']);
+    check($newSup['status'] === 422 && $paula === null, 'Corpo com perfil e recusado: o servidor decide o perfil');
+    $newSup = req('POST', '/api/users', ['name' => 'Paula Reis', 'email' => 'paula@cti.demo', 'team_id' => 2]);
+    $paula = $one('SELECT * FROM users WHERE email=?', ['paula@cti.demo']);
+    check($newSup['status'] === 201 && $paula['role'] === 'supervisor' && (int)$paula['team_id'] === 2 && (int)$paula['active'] === 1, 'Gestor cria supervisor na equipe escolhida');
+    check(req('POST', '/api/users', ['name' => 'Sem Equipe', 'email' => 'semequipe@cti.demo', 'team_id' => 99])['status'] === 400, 'Gestor nao cria supervisor em equipe inexistente');
+    check(req('POST', '/api/users', ['name' => 'Repetido', 'email' => 'MARINA@cti.demo', 'team_id' => 1])['status'] === 409, 'Email repetido sem diferenciar caixa responde 409');
+    check(req('POST', '/api/users', ['name' => 'x', 'email' => 'curto@cti.demo', 'team_id' => 1])['status'] === 422, 'Nome curto demais responde 422');
+    check(req('POST', "/api/users/{$paula['id']}/deactivate")['status'] === 200 && (int)$one('SELECT active FROM users WHERE id=?', [$paula['id']])['active'] === 0, 'Gestor desativa supervisor');
+    check((int)$one("SELECT COUNT(*) c FROM audit_events WHERE event='user_deactivated' AND target_user_id=? AND user_id=3", [$paula['id']])['c'] === 1, 'Desativacao fica na auditoria com autor e alvo');
+    check(req('POST', "/api/users/{$paula['id']}/reactivate")['status'] === 200 && (int)$one('SELECT active FROM users WHERE id=?', [$paula['id']])['active'] === 1, 'Gestor reativa supervisor');
+    check(req('POST', '/api/users/1/deactivate')['status'] === 403, 'Gestor nao desativa atendente');
+    check(req('POST', '/api/users/3/deactivate')['status'] === 403, 'Gestor nao desativa a si mesmo');
+    check(req('POST', '/api/users/999/deactivate')['status'] === 404, 'Usuario inexistente responde 404');
+    $onlySup = req('POST', '/api/users/2/deactivate');
+    check($onlySup['status'] === 409 && $onlySup['body']['message'] === 'A equipe ficaria sem supervisor ativo.' && (int)$one('SELECT active FROM users WHERE id=2')['active'] === 1, 'Unica supervisora da equipe 1 nao pode ser desativada');
+    check(req('POST', '/api/users/8/deactivate')['status'] === 200, 'Equipe 2 ainda tem Paula, entao Diego pode ser desativado');
+    $lastSup = req('POST', "/api/users/{$paula['id']}/deactivate");
+    check($lastSup['status'] === 409 && (int)$one('SELECT active FROM users WHERE id=?', [$paula['id']])['active'] === 1, 'Ultimo supervisor ativo da equipe 2 nao pode ser desativado');
+    check(req('POST', '/api/users/8/reactivate')['status'] === 200, 'Gestor reativa Diego');
+
+    $pw('marina@cti.demo');
+    $team = req('GET', '/api/users');
+    check($team['status'] === 200 && array_column($team['body']['data'], 'email') === ['rafael@cti.demo', 'bruno@cti.demo'], 'Supervisor lista so os atendentes da propria equipe');
+    $newAtt = req('POST', '/api/users', ['name' => 'Joao Lima', 'email' => 'joao@cti.demo']);
+    $joao = $one('SELECT * FROM users WHERE email=?', ['joao@cti.demo']);
+    check($newAtt['status'] === 201 && $joao['role'] === 'attendant' && (int)$joao['team_id'] === 1, 'Supervisor cria atendente na propria equipe');
+    check(req('POST', '/api/users', ['name' => 'Joana Lima', 'email' => 'joana@cti.demo', 'team_id' => 2])['status'] === 422, 'Supervisor nao escolhe equipe');
+    $openTickets = (int)$u->query("SELECT COUNT(*) FROM tickets WHERE attendant_id=1 AND status='active'")->fetchColumn();
+    $busy = req('POST', '/api/users/1/deactivate');
+    check($openTickets > 0 && $busy['status'] === 409 && $busy['body']['message'] === 'Este atendente tem atendimentos em aberto. Conclua-os antes de desativar.' && (int)$one('SELECT active FROM users WHERE id=1')['active'] === 1, 'Atendente com atendimento em aberto nao pode ser desativado');
+    check(req('POST', '/api/users/6/deactivate')['status'] === 403, 'Supervisor nao desativa atendente de outra equipe');
+    check(req('POST', '/api/users/8/deactivate')['status'] === 403, 'Supervisor nao desativa outro supervisor');
+    check(req('POST', '/api/users/2/deactivate')['status'] === 403, 'Supervisor nao desativa a si mesmo');
+    check(req('POST', "/api/users/{$joao['id']}/deactivate")['status'] === 200, 'Supervisor desativa atendente da propria equipe');
+    check(req('GET', '/api/bootstrap')['body']['data']['attendants'] === array_values(array_filter(req('GET', '/api/bootstrap')['body']['data']['attendants'], fn($a) => $a['id'] !== $joao['id'])), 'Atendente desativado some da lista de atendentes');
+    check(req('POST', "/api/users/{$joao['id']}/reactivate")['status'] === 200, 'Supervisor reativa atendente da propria equipe');
+    check($pw('joao@cti.demo')['status'] === 200 && req('GET', '/api/bootstrap')['body']['data']['user']['team_id'] === 1, 'Atendente criado entra com a senha padrao');
+    foreach (['rafael@cti.demo' => 'atendente', 'lucas@cti.demo' => 'cliente'] as $email => $who) {
+        $pw($email);
+        check(req('GET', '/api/users')['status'] === 403 && req('POST', '/api/users', ['name' => 'Intruso', 'email' => 'intruso@cti.demo'])['status'] === 403 && req('POST', '/api/users/5/deactivate')['status'] === 403, "Perfil $who nao gerencia usuarios");
+    }
+    $_SESSION = [];
+    check(req('GET', '/api/users')['status'] === 401, 'API de usuarios exige sessao');
+    unset($u);
+
     $app = $prevApp;
     unset($n, $prevApp);
 
