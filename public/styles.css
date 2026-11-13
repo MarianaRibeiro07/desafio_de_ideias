@@ -138,7 +138,6 @@
 .theme-dash.dark .breadcrumb strong{color:var(--ink)}
 .theme-dash.dark .menu-btn{background:rgba(255,255,255,.07);border-color:var(--line);color:var(--ink)}
 .theme-dash.dark .date-pill{background:rgba(255,255,255,.06);border-color:var(--line);color:var(--ink)}
-.theme-dash.dark 
 .theme-dash.dark .card{background:linear-gradient(180deg,#0f2550,#0b1c40);border:1px solid var(--line);border-radius:18px;box-shadow:0 12px 32px rgba(0,0,0,.3);color:var(--ink)}
 .theme-dash.dark .banner{background:rgba(76,155,255,.1);border-color:rgba(76,155,255,.3);color:#c4dbff}
 .theme-dash.dark .banner-warning{background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.32);color:#f8de95}
