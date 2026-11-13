@@ -41,11 +41,10 @@ CAPTCHA, permissões da extensão e pagamento podem exigir minha intervenção.
 - Guia principal: [docs/hospedagem.md](hospedagem.md), dentro do projeto.
 - Estado e plano: `docs/estado-atual.md` e `docs/plano-demo-hospedada.md`.
 - O repositório remoto é `MarianaRibeiro07/desafio_de_ideias`.
-- A branch desta entrega é `feat/mvp-hospedado-gemini`, criada a partir de
-  `feat/mvp-ajustes-feedback-cti`. Confira o estado atual antes de agir.
-- Use a versão completa dessa branch e preserve eventuais alterações locais.
-  Não substitua a pasta por um clone da branch principal nem descarte mudanças
-  para deixar o Git limpo.
+- A entrega foi integrada à `main`, que é a origem do deploy. Confira o estado
+  atual antes de agir.
+- Preserve eventuais alterações locais. Não descarte mudanças para deixar o Git
+  limpo.
 - Ainda não foi comprovada a criação das contas Alwaysdata e Google AI Studio.
   Primeiro descubra o estado pelas sessões autorizadas do navegador.
 - A implementação passou em testes locais com respostas simuladas. Isso não prova

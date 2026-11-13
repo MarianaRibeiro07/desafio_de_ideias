@@ -3,8 +3,17 @@
 ## Atualização de 13 de novembro de 2026: publicado e validado com Gemini real
 
 URL pública: https://ctiescuta.alwaysdata.net (Alwaysdata Free, conta `ctiescuta`,
-PHP 8.4, SQLite, Force HTTPS). Versão publicada: commit `685e6c7` da branch
-`feat/mvp-hospedado-gemini`.
+PHP 8.4, SQLite, Force HTTPS). A entrega foi integrada à `main`, que passa a ser
+a origem do deploy. O código publicado é o do commit `685e6c7`, idêntico ao da
+`main` em `src`, `database`, `bin` e `public`.
+
+Para atualizar a publicação, entre no terminal web do painel (Remote access >
+SSH/SFTP > "on the Web") e execute. O comando substitui só o código e preserva
+`~/private`, onde ficam chave, banco e áudios:
+
+```sh
+rm -rf ~/tmp-cti && git clone -q --depth 1 -b main https://github.com/MarianaRibeiro07/desafio_de_ideias.git ~/tmp-cti && git -C ~/tmp-cti log --oneline -1 && for d in src database bin public; do rm -rf ~/cti/$d && cp -r ~/tmp-cti/$d ~/cti/; done && rm -rf ~/tmp-cti
+```
 
 Caminhos efetivos no servidor:
 
