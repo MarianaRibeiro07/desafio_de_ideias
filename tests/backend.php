@@ -803,6 +803,18 @@ try {
     check($del['status'] === 200 && $eOne('SELECT id FROM users WHERE id=?', [$ed]) === null, 'Conta sem historico e apagada de verdade');
     check((int)$eOne("SELECT COUNT(*) c FROM audit_events WHERE event='user_deleted' AND user_id=2 AND target_user_id=?", [$ed])['c'] === 1, 'Exclusao fica na auditoria com o id apagado como alvo');
     check(req('DELETE', "/api/users/$ed")['status'] === 404, 'Excluir de novo responde 404');
+    // O SQLite reaproveita o maior id apagado; a sessao aberta da conta apagada nao pode virar a conta nova.
+    $reuso = (int)req('POST', '/api/users', ['name' => 'Atendente Reuso', 'email' => 'reuso.um@cti.demo'])['body']['data']['id'];
+    check($pw('reuso.um@cti.demo')['status'] === 200, 'Conta nova entra antes de ser apagada');
+    $sessaoAntiga = $_SESSION;
+    $pw('marina@cti.demo');
+    req('DELETE', "/api/users/$reuso");
+    $herdeiro = req('POST', '/api/users', ['name' => 'Atendente Herdeiro', 'email' => 'reuso.dois@cti.demo']);
+    check((int)$herdeiro['body']['data']['id'] === $reuso, 'Conta criada depois da exclusao herda o mesmo id');
+    $_SESSION = $sessaoAntiga;
+    check(req('GET', '/api/session')['body']['data']['user'] === null && req('GET', '/api/bootstrap')['status'] === 401, 'Sessao da conta apagada nao vale para a conta nova com o mesmo id');
+    $pw('marina@cti.demo');
+    req('DELETE', "/api/users/$reuso");
     $hist = req('POST', '/api/users', ['name' => 'Atendente Com Historico', 'email' => 'historico@cti.demo'])['body']['data']['id'];
     $e->prepare("INSERT INTO tickets(protocol,client_id,attendant_id,team_id,subject,channel,status,created_at,response_due_at) VALUES ('ATD-HIST-0001',1,?,1,'Atendimento antigo do arquivado','Portal','resolved','2026-01-01T10:00:00+00:00','2026-01-01T14:00:00+00:00')")->execute([$hist]);
     check(($rowOf(req('GET', '/api/users')['body']['data'], $hist)['has_history'] ?? null) === true, 'Atendimento antigo conta como historico na lista');

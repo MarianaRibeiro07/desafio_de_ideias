@@ -255,8 +255,12 @@ final class App {
     }
 
     private function ok(mixed $data, int $status=200): array { return ['status'=>$status,'body'=>['data'=>$data],'headers'=>[]]; }
+    // O SQLite reaproveita o maior id apagado; a impressao impede que a sessao de uma conta excluida vire a conta nova com o mesmo id.
+    private static function sessionKey(array $user): string { return hash('sha256',$user['id'].'|'.$user['password_hash']); }
     private function user(bool $required=true): ?array {
-        $u=isset($_SESSION['user_id'])?$this->one('SELECT id,name,email,role,team_id,client_id FROM users WHERE id=? AND active=1',[$_SESSION['user_id']]):null;
+        $u=isset($_SESSION['user_id'])?$this->one('SELECT id,name,email,role,team_id,client_id,password_hash FROM users WHERE id=? AND active=1',[$_SESSION['user_id']]):null;
+        if ($u && !hash_equals(self::sessionKey($u),(string)($_SESSION['user_key']??''))) { $u=null; }
+        if ($u) { unset($u['password_hash']); }
         if (!$u && $required) { $this->fail(401,'Entre na plataforma para continuar.'); }
         return $u;
     }
@@ -270,7 +274,7 @@ final class App {
         if (!$user || !$valid) { $this->run('INSERT INTO login_attempts(identity,created_at) VALUES (?,?)',[$identity,$this->now()]); $this->fail(401,'E-mail ou senha incorretos.'); }
         $this->run('DELETE FROM login_attempts WHERE identity=?',[$identity]);
         if (session_status()===PHP_SESSION_ACTIVE) { session_regenerate_id(true); }
-        $_SESSION=['user_id'=>$user['id'],'csrf_token'=>bin2hex(random_bytes(32))];
+        $_SESSION=['user_id'=>$user['id'],'user_key'=>self::sessionKey($user),'csrf_token'=>bin2hex(random_bytes(32))];
         return $this->ok(['user'=>$this->user(),'csrf_token'=>$_SESSION['csrf_token']]);
     }
     private function scope(array $u, string $alias='t'): array {
