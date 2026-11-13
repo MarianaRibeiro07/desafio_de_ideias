@@ -225,7 +225,7 @@ Respostas JSON de sucesso usam `{"data": ...}`. Erros usam `{"message": "..."}`.
 | `GET /api/reports` | Indicadores filtrados, mais `comparison`, `deadline`, `by_priority` e `by_support_level` (contrato abaixo) |
 | `GET /api/reports/export` | CSV dos atendimentos no mesmo escopo e filtros |
 
-Os modos de feedback são `quick`, `text` e `audio`. Texto admite até 500 caracteres e cinco linhas. A gravação é WAV PCM mono de 16 bits, entre 0,1 e 60 segundos e até 6 MB; o servidor confere a estrutura do WAV. O cliente não possui opção de selecionar arquivo para upload. A transmissão da gravação utiliza o campo multipart `audio`.
+Os modos de feedback são `quick`, `text` e `audio`. Texto admite até 500 caracteres e cinco linhas. A gravação é WAV PCM mono de 16 bits, entre 0,1 e 60 segundos e até 6 MB; o servidor confere a estrutura do WAV. O cliente escolhe uma única forma por envio: escrever, gravar ou anexar um arquivo de áudio. O anexo é decodificado no navegador e convertido em WAV PCM mono de 16 bits a 16 kHz antes do envio, com o mesmo limite de 60 segundos; o servidor recebe o mesmo modo `audio` da gravação. A transmissão da gravação utiliza o campo multipart `audio`.
 
 O envio de feedback executa a manutenção antes de consultar o atendimento e confere novamente o prazo dentro da transação. Uma página aberta antes do vencimento não permite confirmar uma solução após as 72 horas: o servidor responde 409, preserva a ausência de avaliação e encerra o atendimento como sem retorno.
 
