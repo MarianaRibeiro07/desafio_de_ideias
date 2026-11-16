@@ -35,6 +35,7 @@ if ($sqlite) {
 check(is_string($version) && version_compare($version, '3.35.0', '>='), 'SQLite >= 3.35 para RETURNING');
 check(extension_loaded('mbstring'), 'Extensao mbstring');
 check(extension_loaded('curl') && function_exists('curl_init'), 'Extensao curl');
+check(extension_loaded('zip') && class_exists('ZipArchive'), 'Extensao zip para exportar planilha');
 
 $root = dirname(__DIR__);
 $storage = getenv('CTI_STORAGE_PATH') ?: $root . '/storage';

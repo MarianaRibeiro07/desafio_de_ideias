@@ -163,8 +163,8 @@ try {
     if (role !== 'client') {
       const report = await api('GET', '/api/reports');
       check(`Relatorio real ${role}`, report.status === 200 && typeof report.body.data.total_tickets === 'number');
-      const csv = await api('GET', '/api/reports/export');
-      check(`CSV ${role}`, csv.status === 200 && csv.type.includes('text/csv') && typeof csv.body === 'string' && csv.body.length > 30);
+      const xlsx = await api('GET', '/api/reports/export');
+      check(`Exportacao ${role}`, xlsx.status === 200 && xlsx.type.includes('spreadsheetml.sheet') && typeof xlsx.body === 'string' && xlsx.body.startsWith('PK') && xlsx.body.length > 30);
     }
     if (role === 'attendant') {
       await evaluate(`location.hash='#clientes'`);

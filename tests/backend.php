@@ -167,9 +167,18 @@ try {
     check(req('POST', "/api/tickets/$id/reply", ['message' => 'Acesso de escrita indevido.'])['status'] === 403, 'Gestor possui leitura sem operar atendimento');
     check(count(req('GET', '/api/reports')['body']['data']['teams']) === 2, 'Gestor compara as duas equipes');
     $export = req('GET', '/api/reports/export');
-    check($export['status'] === 200 && str_contains($export['headers']['Content-Type'], 'text/csv'), 'Exportacao CSV disponivel');
+    check($export['status'] === 200 && $export['headers']['Content-Type'] === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' && str_contains($export['headers']['Content-Disposition'], '.xlsx"'), 'Exportacao Excel disponivel');
     $pdo->exec("UPDATE tickets SET subject='=HYPERLINK(1)' WHERE id=$pending");
-    check(str_contains(req('GET', '/api/reports/export')['raw'], "'=HYPERLINK(1)"), 'Exportacao neutraliza formula de planilha');
+    $xlsxPath = tempnam(sys_get_temp_dir(), 'cti-xlsx-'); file_put_contents($xlsxPath, req('GET', '/api/reports/export')['raw']);
+    $zip = new ZipArchive(); check($zip->open($xlsxPath) === true, 'Exportacao e um zip valido');
+    $parts = []; for ($i = 0; $i < $zip->numFiles; $i++) { $name = $zip->getNameIndex($i); $parts[$name] = $zip->getFromName($name); }
+    $zip->close(); @unlink($xlsxPath);
+    $sheet1 = $parts['xl/worksheets/sheet1.xml'] ?? '';
+    check(str_contains($sheet1, 'Situação') && preg_match('/>(Em atendimento|Aguardando cliente|Resolvido|Encerrado sem retorno)</', $sheet1) === 1 && preg_match('/awaiting_feedback|closed_no_response|client_confirmed|no_response_72h/', $sheet1) === 0,'Planilha traz rotulos humanos e nao codigos internos');
+    check(preg_match('/<c [^>]*t="inlineStr"[^>]*><is><t[^>]*>=HYPERLINK\(1\)<\/t><\/is><\/c>/', $sheet1) === 1 && preg_match('/<f[\s>\/]/', $sheet1) === 0, 'Exportacao grava texto como inlineStr e nunca como formula');
+    check(isset($parts['xl/tables/table1.xml'], $parts['xl/worksheets/sheet2.xml'], $parts['xl/styles.xml'], $parts['[Content_Types].xml']), 'Planilha tem tabela, aba Resumo, estilos e content types');
+    $badParts = array_keys(array_filter($parts, function ($xml, $name) { if (!str_ends_with($name, '.xml') && !str_ends_with($name, '.rels')) { return false; } $d = new DOMDocument(); return !@$d->loadXML($xml); }, ARRAY_FILTER_USE_BOTH));
+    check($badParts === [], 'Todas as partes XML da planilha sao bem formadas');
     $pdo->exec("UPDATE tickets SET created_at='2020-01-01T00:00:00+00:00' WHERE id=$id");
     $today = gmdate('Y-m-d');
     check(req('GET', '/api/reports', [], ['from' => $today, 'to' => $today, 'client_id' => 1, 'q' => 'Falha no acesso VPN corporativo'])['body']['data']['received'] === 1, 'Periodo de feedback usa recebimento mesmo em atendimento antigo');
@@ -595,7 +604,7 @@ try {
     login('marina@cti.demo');
     $teamRep = $rep();
     check($teamRep['deadline']['total'] === $teamRep['total_tickets'] && $teamRep['deadline']['total'] < $after['deadline']['total'], 'Blocos novos respeitam o escopo do perfil');
-    check(req('GET', '/api/reports/export')['status'] === 200, 'Exportacao CSV continua funcionando');
+    check(req('GET', '/api/reports/export')['status'] === 200, 'Exportacao continua funcionando');
 
     // N5: backup consistente com retencao
     file_put_contents($nDir . '/storage/audio/a.wav', 'RIFFdemo');

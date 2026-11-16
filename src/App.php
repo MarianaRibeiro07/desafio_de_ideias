@@ -829,8 +829,8 @@ final class App {
         $analyzed=array_sum($sentiments);$countStatus=fn(string $status)=>count(array_filter($tickets,fn($t)=>$t['status']===$status));
         $report=['received'=>count($feedbacks),'analyzed'=>$analyzed,'positive_percent'=>$analyzed?round($sentiments['positive']/$analyzed*100):0,'critical'=>count($critical),'total_tickets'=>count($tickets),'awaiting_feedback'=>$countStatus('awaiting_feedback'),'resolved'=>$countStatus('resolved'),'closed_no_response'=>$countStatus('closed_no_response'),'active'=>$countStatus('active'),'sentiments'=>$sentiments,'trend'=>array_values($trend),'topics'=>$topicRows,'teams'=>array_values($teams),'critical_cases'=>$critical,'response_overdue'=>$u['role']!=='attendant'?[]:array_values(array_filter($tickets,fn($t)=>$t['status']==='active'&&!$t['replied_at']&&strtotime($t['response_due_at'])<time())),'comparison'=>$comparison,'deadline'=>$this->deadline($tickets),'by_priority'=>$this->countBy($tickets,'priority',array_keys(self::RESPONSE_MINUTES)),'by_support_level'=>$this->countBy($tickets,'support_level',[1,2,3]),'filters'=>$q];
         if(!$export){return $this->ok($report);}
-        $stream=fopen('php://temp','w+');fwrite($stream,"\xEF\xBB\xBF");fputcsv($stream,['Protocolo','Assunto','Equipe','Canal','Status','Data','Encerramento'],';', '"', '');
-        foreach($tickets as $t){$row=[$t['protocol'],$t['subject'],$t['team_name'],$t['channel'],$t['status'],$t['created_at'],$t['closure_reason']??''];$row=array_map(static fn($v)=>preg_match('/^[\s]*[=+@\-\t\r]/u',(string)$v)?"'".$v:$v,$row);fputcsv($stream,$row,';', '"', '');}rewind($stream);$csv=stream_get_contents($stream);fclose($stream);
-        return ['status'=>200,'raw'=>$csv,'headers'=>['Content-Type'=>'text/csv; charset=utf-8','Content-Disposition'=>'attachment; filename="cti-relatorio-'.date('Y-m-d').'.csv"']];
+        require_once __DIR__.'/XlsxExport.php';
+        $day=(new DateTimeImmutable('now',new DateTimeZone('America/Sao_Paulo')))->format('Y-m-d');
+        return ['status'=>200,'raw'=>(new XlsxExport())->build($tickets,$q,$u['role']),'headers'=>['Content-Type'=>'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition'=>'attachment; filename="cti-atendimentos-'.$day.'.xlsx"']];
     }
 }
