@@ -1,5 +1,44 @@
 # Estado atual do MVP
 
+## Atualização de 16 de novembro de 2026: redesign, planilha xlsx e microinterações
+
+A branch `feat/redesign-sem-cards` foi integrada à `main` por fast-forward
+(`8438fad..2f7a9cf`) e publicada. O que mudou:
+
+- Redesign sem cards, etapas 1 e 2: telas planas, estrutura por filete e espaço;
+  nas telas do gestor, painel com contorno leve, sem sombra.
+- Sem a faixa "Escuta com apoio de IA" e sem o rodapé "A IA apoia a avaliação
+  humana", que se repetiam em todas as telas.
+- Mini gráficos da visão geral com a linha inteira e o marcador alinhado e com
+  valor (o tracejado com `pathLength` e `non-scaling-stroke` cortava a linha).
+- Exportação em planilha `.xlsx` no lugar do CSV: aba Atendimentos como Tabela
+  do Excel e aba Resumo. O preflight passou a conferir a extensão `zip`.
+- Microinterações curtas; a entrada de tela só roda na troca de rota.
+
+Testes locais antes do deploy: backend 501 de 501 e navegador 283 de 283.
+
+**Publicado em 16/11/2026, 19h22 (horário do servidor),** commit `2f7a9cf`, pelo
+terminal web do painel. Backup anterior em
+`~/private/backups/cti-backup-20261116-192229` (796,7 KB). Conferências: extensão
+`zip` presente no PHP 8.4.27 da linha de comando; preflight com 12 `PASS` e saída 0.
+Pelos dois endereços, `/`, `/app.js` e `/styles.css` respondem 200 e já são os
+novos, `/api/bootstrap` e `/api/reports/export` sem login respondem 401, e
+`/src/App.php` e `/src/XlsxExport.php` respondem 404. Nenhuma chamada ao Gemini.
+
+Falta conferir logado: baixar a planilha pelo botão "Exportar Excel" no site
+publicado, porque a extensão `zip` foi conferida só no PHP da linha de comando.
+
+### Pendências de segurança apontadas por revisão automática
+
+Vêm da gestão de usuários, não desta entrega:
+
+1. Toda conta criada pelas telas Equipe e Supervisores nasce com a senha fixa
+   das contas de demonstração, que é pública. Antes de qualquer uso real: senha
+   gerada por conta e troca obrigatória no primeiro acesso.
+2. O atendente pode trocar o e-mail de login de uma empresa cliente sem
+   confirmação e sem encerrar a sessão aberta dessa conta. Junto com o item 1,
+   isso permite tomar a conta do cliente.
+
 ## Atualização de 13 de novembro de 2026 (fim do dia): editar, excluir e arquivar
 
 Clientes, atendentes e supervisores agora podem ser editados, excluídos e
