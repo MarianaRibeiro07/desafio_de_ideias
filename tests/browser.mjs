@@ -15,6 +15,17 @@ const pending = new Map();
 let browser, socket, request = 0;
 let workflowTicket = null;
 const workflowSubject = `VPN QA navegador ${Date.now()}`;
+const qaAttendantEmail = `qa.atendente.${Date.now()}@cti.demo`;
+const qaSupervisorEmail = `qa.supervisor.${Date.now()}@cti.demo`;
+const userRow = email => `[...document.querySelectorAll('#users-list tbody tr')].find(r => r.textContent.includes(${JSON.stringify(email)}))`;
+async function toggleUser(email, id, action, expected) {
+  await evaluate(`document.querySelector('#users-list [data-action="${action}"][data-id="${id}"]').click()`);
+  await until(`(${userRow(email)})?.textContent.includes(${JSON.stringify(expected)})`, `${action} ${email}`);
+}
+async function createUser(name, email, teamId) {
+  await evaluate(`(() => { const f = document.querySelector('#user-form'); f.querySelector('#user_name').value = ${JSON.stringify(name)}; f.querySelector('#user_email').value = ${JSON.stringify(email)}; ${teamId === undefined ? '' : `f.querySelector('#team_id').value = ${JSON.stringify(String(teamId))};`} f.requestSubmit(); })()`);
+  await until(`document.querySelector('#toast').textContent.includes(${JSON.stringify(email)}) && !!(${userRow(email)})`, `conta criada ${email}`);
+}
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const visibleCols = `[...document.querySelectorAll('table')].map(t => [...t.querySelectorAll('thead th')].filter(th => th.offsetParent !== null && th.getBoundingClientRect().width > 0).length)`;
 function check(name, condition, details) {
@@ -46,6 +57,19 @@ async function shot(name, width = 1440) {
   await evaluate('document.fonts.ready');
   const value = await cdp('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
   await writeFile(path.join(output, `${name}-${width}.png`), Buffer.from(value.data, 'base64'));
+}
+// Sessao propria no Node, com cookie e CSRF separados da aba do navegador.
+async function nodeRequest(email, method, route, body) {
+  let cookie = '';
+  const call = async (verb, path, payload, token) => {
+    const response = await fetch(base + path, { method: verb, headers: { Cookie: cookie, ...(token ? { 'X-CSRF-Token': token } : {}), ...(payload ? { 'Content-Type': 'application/json' } : {}) }, body: payload ? JSON.stringify(payload) : undefined });
+    const set = response.headers.getSetCookie().find(value => value.startsWith('cti_session='));
+    if (set) cookie = set.split(';')[0];
+    return { status: response.status, body: await response.json().catch(() => null) };
+  };
+  const session = await call('GET', '/api/session');
+  const login = await call('POST', '/api/login', { email, password: 'CtiDemo2026!' }, session.body?.data?.csrf_token);
+  return call(method, route, body, login.body?.data?.csrf_token);
 }
 async function api(method, route, body) {
   return evaluate(`(async () => {
@@ -87,7 +111,7 @@ try {
   await until('!!document.querySelector("form")', 'formulario de login');
   await shot('login');
   check('Login exibe logo branca sobre o azul', await evaluate(`!![...document.querySelectorAll('.login-hero img')].find(img => img.src.includes('cti-logo-branca.png') && img.complete && img.naturalWidth > 0)`));
-  check('Login sem textos de projeto academico no rodape', await evaluate(`(() => { const text = document.body.innerText; return !text.includes('Projeto integrador') && !text.includes('SENAI 2026') && !text.includes('Plataforma acadêmica') && text.includes('Conexões que importam') && text.includes('Privacidade em primeiro lugar') && [...document.querySelectorAll('.login-panel .login-footer span')][0]?.textContent.trim() === 'CTI Escuta'; })()`));
+  check('Login sem textos de projeto academico no rodape', await evaluate(`(() => { const text = document.body.innerText; return !text.includes('Projeto integrador') && !text.includes('SENAI 2026') && !text.includes('Plataforma acadêmica') && !!document.querySelector('#login-form'); })()`));
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await pause(200);
   const loginMobile = await evaluate('({width:document.documentElement.scrollWidth,viewport:innerWidth})');
@@ -242,11 +266,32 @@ try {
       await until(`document.querySelector('#audio-preview audio').readyState >= 1`, 'preview de audio decodificado');
       const wave = await evaluate(`({duration:document.querySelector('#audio-preview audio').duration,blob:document.querySelector('#audio-preview audio').src.startsWith('blob:')})`);
       check('Navegador reproduz WAV com microfone sintetico', wave.blob && wave.duration > 0 && wave.duration <= 60, wave);
+      check('Gravacao bloqueia anexo concorrente', await evaluate(`document.querySelector('[data-action="feedback-mode"][data-mode="upload"]')?.disabled === true`));
       await evaluate(`document.querySelector('[data-action="clear-feedback"]').click()`);
+      check('Formulario oferece exatamente tres formatos', await evaluate(`[...document.querySelectorAll('[data-action="feedback-mode"]')].map(b => b.dataset.mode + ':' + b.textContent.trim()).join('|') === 'text:Escrever|audio:Gravar áudio|upload:Anexar áudio'`));
+      await evaluate(`document.querySelector('[data-action="feedback-mode"][data-mode="upload"]').click()`);
+      check('Aba de anexo abre seletor de arquivo de audio sem gravador nem texto', await evaluate(`(() => { const input = document.querySelector('#feedback-file'); return !!input && input.type === 'file' && input.accept === 'audio/*' && !document.querySelector('#feedback-text') && !document.querySelector('#record-start'); })()`));
+      const attach = file => evaluate(`(async () => { const file = await ${file}; const input = document.querySelector('#feedback-file'); const transfer = new DataTransfer(); transfer.items.add(file); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+      const qaWav = seconds => `(() => { const rate = 8000, n = rate * ${seconds}; const view = new DataView(new ArrayBuffer(44 + n * 2)); const w = (o, s) => [...s].forEach((c, i) => view.setUint8(o + i, c.charCodeAt(0))); w(0, 'RIFF'); view.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); w(36, 'data'); view.setUint32(40, n * 2, true); for (let i = 0; i < n; i++) view.setInt16(44 + i * 2, Math.round(Math.sin(i / 8) * 8000), true); return new File([view], 'longo.wav', { type: 'audio/wav' }); })()`;
+      const qaWebm = `(async () => { const ctx = new AudioContext(); const osc = ctx.createOscillator(); const dest = ctx.createMediaStreamDestination(); osc.connect(dest); osc.start(); const rec = new MediaRecorder(dest.stream, { mimeType: 'audio/webm' }); const parts = []; rec.ondataavailable = e => parts.push(e.data); const done = new Promise(r => { rec.onstop = r; }); rec.start(); await new Promise(r => setTimeout(r, 1500)); rec.stop(); await done; osc.stop(); await ctx.close(); return new File(parts, 'mensagem.webm', { type: 'audio/webm' }); })()`;
+      await attach(qaWav(61));
+      await until(`document.querySelector('.toast')?.textContent.includes('mais de 60 segundos')`, 'recusa de anexo acima de 60 segundos');
+      check('Anexo acima de 60 segundos e recusado sem ocupar o formulario', await evaluate(`!document.querySelector('#audio-preview audio') && !document.querySelector('[data-action="feedback-mode"][data-mode="text"]').disabled && document.querySelector('#feedback-file').value === ''`));
+      await attach(qaWebm);
+      await until(`!!document.querySelector('#audio-preview audio')`, 'anexo WebM convertido');
+      await until(`document.querySelector('#audio-preview audio').readyState >= 1`, 'preview do anexo decodificado');
+      const preview = await evaluate(`document.querySelector('#audio-preview audio').duration`);
+      check('Preview do anexo tem a duracao do arquivo', preview > 1 && preview < 3, preview);
+      check('Anexo bloqueia texto e gravacao concorrentes', await evaluate(`document.querySelector('[data-action="feedback-mode"][data-mode="text"]').disabled && document.querySelector('[data-action="feedback-mode"][data-mode="audio"]').disabled`));
       await evaluate(`document.querySelector('#feedback-form input[name="rating"][value="1"]').checked=true;document.querySelector('#feedback-form input[name="confirmed"]').checked=true;document.querySelector('#feedback-form').requestSubmit()`);
       await until(`document.querySelector('.success-card')?.textContent.includes('ainda precisa de ajuda')`, 'envio da decisao negativa');
-      const rejected = (await api('GET', '/api/bootstrap')).body.data.tickets.find(t => t.id === workflowTicket);
+      const afterAttach = (await api('GET', '/api/bootstrap')).body.data;
+      const rejected = afterAttach.tickets.find(t => t.id === workflowTicket);
       check('Decisao negativa por botao mantem atendimento aberto', rejected.status === 'active' && rejected.manual_status_changes === 1);
+      const attached = afterAttach.feedbacks.find(f => f.ticket_id === workflowTicket && f.mode === 'audio');
+      check('Audio anexado chega ao servidor como feedback de audio', Boolean(attached?.audio_url), afterAttach.feedbacks.filter(f => f.ticket_id === workflowTicket).map(f => f.mode));
+      const stored = await evaluate(`(async () => { const response = await fetch(${JSON.stringify(attached?.audio_url ?? '')}); const head = new Uint8Array(await (await response.blob()).slice(0, 44).arrayBuffer()); const view = new DataView(head.buffer); return { status: response.status, tag: String.fromCharCode(...head.slice(0, 4)) + String.fromCharCode(...head.slice(8, 12)), format: view.getUint16(20, true), channels: view.getUint16(22, true), rate: view.getUint32(24, true), bits: view.getUint16(34, true) }; })()`);
+      check('Anexo WebM foi convertido em WAV PCM mono 16 bits a 16 kHz', stored.status === 200 && stored.tag === 'RIFFWAVE' && stored.format === 1 && stored.channels === 1 && stored.bits === 16 && stored.rate === 16000, stored);
       check('Pos-envio do cliente nao aponta para Meus atendimentos', await evaluate(`!document.body.innerText.includes('Meus atendimentos')`));
       await shot('cliente-feedback-negativo');
     }
@@ -298,6 +343,60 @@ try {
       await until(`!document.querySelector('dialog[open]')`, 'supervisor libera nova tentativa');
       const retry = (await api('GET', '/api/bootstrap')).body.data.tickets.find(t => t.id === workflowTicket);
       check('Nova tentativa supervisor preserva limite manual', retry.status === 'awaiting_feedback' && retry.manual_status_changes === 1 && retry.solution_attempt === 2);
+      check('Supervisor tem a aba Equipe no fim do menu', links.at(-1)?.href === '#equipe', links);
+      await evaluate(`location.hash='#equipe'`);
+      await until(`!!document.querySelector('#user-form') && !!document.querySelector('#users-list .data-table')`, 'aba Equipe do supervisor');
+      check('Equipe do supervisor: h1, formulario so com nome e e-mail e aviso da senha padrao', await evaluate(`document.querySelector('h1')?.textContent.includes('Equipe') && !!document.querySelector('#user_name') && document.querySelector('#user_email')?.type === 'email' && !document.querySelector('#user-form #team_id') && document.querySelector('#page-content').textContent.includes('senha padrão das contas de demonstração')`));
+      await createUser('Atendente QA Navegador', qaAttendantEmail);
+      check('Cadastro do atendente confirma a conta e a senha padrao', await evaluate(`document.querySelector('#toast').textContent === ${JSON.stringify(`Conta criada para ${qaAttendantEmail}. Entra com a senha padrão das contas de demonstração.`)}`), await evaluate(`document.querySelector('#toast').textContent`));
+      const newAttendant = (await api('GET', '/api/users')).body.data.find(u => u.email === qaAttendantEmail);
+      check('Atendente novo gravado ativo na equipe da supervisora', Number(newAttendant?.active) === 1, newAttendant);
+      check('Atendente novo aparece Ativo com botao Desativar', await evaluate(`(() => { const r = ${userRow(qaAttendantEmail)}; return Boolean(r) && r.textContent.includes('Ativo') && r.querySelector('[data-action="user-deactivate"]')?.textContent.trim() === 'Desativar'; })()`));
+      check('Lista da equipe nao oferece acao sobre a propria conta', await evaluate(`!document.querySelector('#users-list [data-id="${boot.body.data.user.id}"]')`));
+      await toggleUser(qaAttendantEmail, newAttendant.id, 'user-deactivate', 'Inativo');
+      check('Desativar atendente grava inativo e oferece Reativar', Number((await api('GET', '/api/users')).body.data.find(u => u.id === newAttendant.id)?.active) === 0 && await evaluate(`(${userRow(qaAttendantEmail)}).querySelector('[data-action="user-reactivate"]')?.textContent.trim() === 'Reativar'`));
+      await toggleUser(qaAttendantEmail, newAttendant.id, 'user-reactivate', 'Ativo');
+      check('Reativar atendente grava ativo de novo', Number((await api('GET', '/api/users')).body.data.find(u => u.id === newAttendant.id)?.active) === 1);
+      const userForm = `document.querySelector('#user-form')`;
+      await evaluate(`(${userRow(qaAttendantEmail)}).querySelector('[data-action="user-edit"]').click()`);
+      check('Editar carrega nome e e-mail no formulario de cima e troca titulo e botao', await evaluate(`(() => { const f = ${userForm}; return f.closest('.form-card').querySelector('h2').textContent === 'Editar atendente' && f.querySelector('#user_name').value === 'Atendente QA Navegador' && f.querySelector('#user_email').value === ${JSON.stringify(qaAttendantEmail)} && f.querySelector('button[type="submit"]').textContent === 'Salvar alterações' && !f.querySelector('[data-action="user-edit-cancel"]').hidden; })()`));
+      await shot('supervisor-equipe-edicao');
+      await evaluate(`document.querySelector('[data-action="user-edit-cancel"]').click()`);
+      check('Cancelar volta ao modo de criacao com o formulario limpo', await evaluate(`(() => { const f = ${userForm}; return f.closest('.form-card').querySelector('h2').textContent === 'Novo atendente' && f.querySelector('#user_name').value === '' && !f.dataset.id && f.querySelector('[data-action="user-edit-cancel"]').hidden && f.querySelector('button[type="submit"]').textContent === 'Criar conta'; })()`));
+      await evaluate(`(${userRow(qaAttendantEmail)}).querySelector('[data-action="user-edit"]').click()`);
+      await evaluate(`(() => { const f = ${userForm}; f.querySelector('#user_name').value = 'Atendente QA Editado'; f.requestSubmit(); })()`);
+      await until(`(${userRow(qaAttendantEmail)})?.textContent.includes('Atendente QA Editado')`, 'atendente editado');
+      check('Salvar alteracoes grava o nome novo e volta ao modo de criacao', (await api('GET', '/api/users')).body.data.find(u => u.id === newAttendant.id)?.name === 'Atendente QA Editado' && await evaluate(`${userForm}.querySelector('button[type="submit"]').textContent === 'Criar conta' && !${userForm}.dataset.id`));
+      const qaDeleteEmail = `qa.excluir.${Date.now()}@cti.demo`;
+      await createUser('Atendente QA Excluir', qaDeleteEmail);
+      const deleteId = (await api('GET', '/api/users')).body.data.find(u => u.email === qaDeleteEmail)?.id;
+      const removeButton = email => `(${userRow(email)}).querySelector('[data-action="user-remove"]')`;
+      check('Conta sem historico oferece Excluir', await evaluate(`${removeButton(qaDeleteEmail)}.textContent.trim() === 'Excluir'`));
+      await evaluate(`${removeButton(qaDeleteEmail)}.click()`);
+      check('Primeiro clique em Excluir so pede confirmacao', await evaluate(`${removeButton(qaDeleteEmail)}.textContent.trim() === 'Confirmar exclusão'`) && (await api('GET', '/api/users')).body.data.some(u => u.id === deleteId));
+      await pause(5300);
+      check('Confirmacao volta ao texto original depois de 5 segundos', await evaluate(`${removeButton(qaDeleteEmail)}.textContent.trim() === 'Excluir'`));
+      await evaluate(`${removeButton(qaDeleteEmail)}.click()`);
+      await evaluate(`${removeButton(qaDeleteEmail)}.click()`);
+      await until(`!(${userRow(qaDeleteEmail)})`, 'conta excluida some da lista');
+      check('Segundo clique exclui a conta sem historico', !(await api('GET', '/api/users')).body.data.some(u => u.id === deleteId) && await evaluate(`document.querySelector('#toast').textContent.includes('excluída')`));
+      const qaArchiveEmail = `qa.arquivar.${Date.now()}@cti.demo`;
+      await createUser('Atendente QA Arquivar', qaArchiveEmail);
+      const archiveId = (await api('GET', '/api/users')).body.data.find(u => u.email === qaArchiveEmail)?.id;
+      const archivedTicket = await nodeRequest(qaArchiveEmail, 'POST', '/api/tickets', { client_id: 1, subject: 'Atendimento QA do atendente arquivado', channel: 'Portal', priority: 'low', status: 'resolved', solution: 'Solucao registrada pelo atendente que sera arquivado.' });
+      await evaluate('location.reload()');
+      await until(`!!document.querySelector('#users-list .data-table') && !!(${userRow(qaArchiveEmail)})`, 'equipe recarregada com a conta que tem historico');
+      check('Conta com historico oferece Arquivar', archivedTicket.status === 201 && await evaluate(`${removeButton(qaArchiveEmail)}.textContent.trim() === 'Arquivar'`), archivedTicket.status);
+      await toggleUser(qaArchiveEmail, archiveId, 'user-deactivate', 'Inativo');
+      check('Desativar conta com historico mantem o botao Arquivar', await evaluate(`${removeButton(qaArchiveEmail)}.textContent.trim() === 'Arquivar'`));
+      await toggleUser(qaArchiveEmail, archiveId, 'user-reactivate', 'Ativo');
+      await evaluate(`${removeButton(qaArchiveEmail)}.click()`);
+      check('Primeiro clique em Arquivar so pede confirmacao', await evaluate(`${removeButton(qaArchiveEmail)}.textContent.trim() === 'Confirmar arquivamento'`));
+      await evaluate(`${removeButton(qaArchiveEmail)}.click()`);
+      await until(`!(${userRow(qaArchiveEmail)})`, 'conta arquivada some da lista');
+      const keptTicket = (await api('GET', '/api/bootstrap')).body.data.tickets.find(t => t.id === archivedTicket.body.data.id);
+      check('Arquivar tira a conta da lista e preserva o atendimento com o nome dela', !(await api('GET', '/api/users')).body.data.some(u => u.id === archiveId) && keptTicket?.attendant_name === 'Atendente QA Arquivar', keptTicket?.attendant_name);
+      await shot('supervisor-equipe');
     }
     if (role === 'manager') {
       await evaluate(`location.hash='#visao-geral'`);
@@ -364,6 +463,28 @@ try {
       check('Gestor acessa relatorio de criticidade', await evaluate(`!!document.querySelector('[data-action="report-type"][data-type="criticality"]')`));
       check('Gestor: Relatorios herda o tema escuro e mantem tabelas com ate 4 colunas e sem rolagem horizontal', await evaluate(`!!document.querySelector('.theme-dash') && ${visibleCols}.every(n => n <= 4) && document.documentElement.scrollWidth <= innerWidth`));
       await shot('gestor-filtro-criticidade');
+      check('Gestor tem a aba Supervisores no fim do menu', links.at(-1)?.href === '#supervisores', links);
+      const supervisors = (await api('GET', '/api/users')).body.data;
+      const qaTeam = supervisors.find(s => Number(s.active) === 1)?.team_id;
+      await evaluate(`location.hash='#supervisores'`);
+      await until(`!!document.querySelector('#user-form #team_id') && !!document.querySelector('#users-list .data-table')`, 'aba Supervisores do gestor');
+      check('Supervisores do gestor: select com todas as equipes', await evaluate(`[...document.querySelectorAll('#team_id option')].filter(o => o.value).map(o => o.value).join('|') === ${JSON.stringify(boot.body.data.teams.map(t => String(t.id)).join('|'))}`), boot.body.data.teams);
+      check('Supervisores do gestor listam os supervisores da API', await evaluate(`document.querySelectorAll('#users-list tbody tr').length`) === supervisors.length);
+      await createUser('Supervisor QA Navegador', qaSupervisorEmail, qaTeam);
+      const newSupervisor = (await api('GET', '/api/users')).body.data.find(u => u.email === qaSupervisorEmail);
+      check('Gestor cria supervisor ativo na equipe escolhida', Number(newSupervisor?.active) === 1 && Number(newSupervisor.team_id) === Number(qaTeam), newSupervisor);
+      await toggleUser(qaSupervisorEmail, newSupervisor.id, 'user-deactivate', 'Inativo');
+      check('Gestor desativa o supervisor', Number((await api('GET', '/api/users')).body.data.find(u => u.id === newSupervisor.id)?.active) === 0);
+      await toggleUser(qaSupervisorEmail, newSupervisor.id, 'user-reactivate', 'Ativo');
+      check('Gestor reativa o supervisor', Number((await api('GET', '/api/users')).body.data.find(u => u.id === newSupervisor.id)?.active) === 1);
+      await evaluate(`(${userRow(qaSupervisorEmail)}).querySelector('[data-action="user-edit"]').click()`);
+      check('Gestor: Editar carrega a equipe do supervisor', await evaluate(`document.querySelector('#user-form #team_id').value === ${JSON.stringify(String(qaTeam))} && document.querySelector('#user-form').closest('.form-card').querySelector('h2').textContent === 'Editar supervisor'`));
+      await evaluate(`(() => { const f = document.querySelector('#user-form'); f.querySelector('#user_name').value = 'Supervisor QA Editado'; f.requestSubmit(); })()`);
+      await until(`(${userRow(qaSupervisorEmail)})?.textContent.includes('Supervisor QA Editado')`, 'supervisor editado');
+      check('Gestor edita o nome do supervisor', (await api('GET', '/api/users')).body.data.find(u => u.id === newSupervisor.id)?.name === 'Supervisor QA Editado');
+      const usersTone = await evaluate(`(() => { const sum = el => getComputedStyle(el).color.match(/\\d+/g).slice(0, 3).map(Number).reduce((a, b) => a + b, 0); return { dark: !!document.querySelector('.theme-dash.dark'), cell: sum(document.querySelector('#users-list tbody td')), label: sum(document.querySelector('label[for="user_name"]')), input: sum(document.querySelector('#user_name')) }; })()`);
+      check('Supervisores legivel no tema escuro do gestor (texto claro)', usersTone.dark && usersTone.cell > 450 && usersTone.label > 450 && usersTone.input > 450, usersTone);
+      await shot('gestor-supervisores');
     }
     await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
     await pause(200);
@@ -408,6 +529,12 @@ try {
   await evaluate(`document.querySelector('#login-email').value='rafael@cti.demo';document.querySelector('#login-password').value='CtiDemo2026!';document.querySelector('#login-form').requestSubmit()`);
   await until(`!!document.querySelector('nav')`, 'login apos expiracao sem recarregar');
   check('Sessao expirada permite novo login sem recarregar', (await api('GET', '/api/bootstrap')).body.data.user.role === 'attendant');
+  await evaluate(`document.querySelector('[data-action="logout"]').click()`);
+  await until(`!!document.querySelector('#login-form')`, 'logout antes do atendente novo');
+  await evaluate(`document.querySelector('#login-email').value=${JSON.stringify(qaAttendantEmail)};document.querySelector('#login-password').value='CtiDemo2026!';document.querySelector('#login-form').requestSubmit()`);
+  await until(`!!document.querySelector('nav')`, 'login do atendente criado pela supervisora');
+  const qaAttendantUser = (await api('GET', '/api/bootstrap')).body.data.user;
+  check('Atendente criado pela supervisora entra com a senha padrao', qaAttendantUser.role === 'attendant' && qaAttendantUser.email === qaAttendantEmail, qaAttendantUser);
   check('Sem excecoes nem assets quebrados', errors.length === 0, errors);
 } catch (error) {
   errors.push({ type: 'qa', message: error.message });

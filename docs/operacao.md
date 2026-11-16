@@ -56,7 +56,7 @@ O envio da solução é a única ação manual do atendente que muda a etapa do 
 
 Se o cliente não responder dentro de 72 horas, o sistema pode encerrar como sem retorno. Esse resultado possui contagem própria e não entra como resolução confirmada. O supervisor da equipe pode enviar nova tentativa com solução e justificativa, preservando o histórico e abrindo novo prazo de 72 horas. O usuário confirmou expressamente que a liberação da nova tentativa cabe ao supervisor.
 
-O cliente responde dentro de sua área autenticada, sem depender de link recebido. Pode usar a avaliação rápida e a confirmação de resolução. Para detalhar, usa texto com até 500 caracteres e cinco linhas ou gravação de até 60 segundos. Não há opção de anexar arquivo de áudio no feedback do cliente.
+O cliente responde dentro de sua área autenticada, sem depender de link recebido. Pode usar a avaliação rápida e a confirmação de resolução. Para detalhar, usa texto com até 500 caracteres e cinco linhas, gravação de até 60 segundos ou um arquivo de áudio anexado de até 60 segundos, escolhendo só uma dessas formas por envio. O formato do anexo depende do que o navegador consegue decodificar; o arquivo é convertido em WAV antes de sair do computador do cliente.
 
 ## Supervisão e relatórios
 

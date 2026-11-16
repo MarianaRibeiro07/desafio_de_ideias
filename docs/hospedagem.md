@@ -114,7 +114,7 @@ Digite `exit` para voltar ao PowerShell do Windows.
 
 **Onde:** a mesma janela do PowerShell, depois de sair do SSH.
 
-Envie a versão desta pasta local na branch `feat/mvp-hospedado-gemini`, que contém a integração preparada para o pitch. Clonar apenas a branch principal do GitHub não inclui essa entrega. Preserve também eventuais alterações locais posteriores.
+Envie a versão desta pasta local na branch `main`, que contém a integração preparada para o pitch. Preserve também eventuais alterações locais posteriores. Se a porta 22 estiver bloqueada na sua rede, use o terminal web do painel e o comando de atualização descrito em [estado atual](estado-atual.md), que clona a `main` direto no servidor.
 
 ~~~powershell
 scp -r .\src .\database .\bin .\public "$($CtiDestino):/home/$CtiConta/cti/"
