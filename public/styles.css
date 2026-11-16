@@ -489,3 +489,86 @@ dialog,.dialog{border-radius:8px}
 .heat-box{border-radius:6px}
 .card.chart-card{padding:18px 0 4px}
 .card.form-card,.card.ticket-card{padding:24px 0}
+/* Redesign etapa 2: destaques, barras, grade e selos sem bloco preenchido */
+.hero-row{gap:0;margin:0 0 4px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.hero,.theme-dash.dark .hero{background:none;box-shadow:none;border-radius:0;color:var(--ink);min-height:0;padding:20px 24px 10px;border-left:1px solid var(--line)}
+.hero:first-child,.theme-dash.dark .hero:first-child{border-left:0;padding-left:0}
+.hero-blue{--tone:#1d5fd0}
+.hero-green{--tone:#087f58}
+.hero-pink{--tone:#cf2a72}
+.theme-dash.dark .hero-blue{--tone:#8fc0ff}
+.theme-dash.dark .hero-green{--tone:#5eead4}
+.theme-dash.dark .hero-pink{--tone:#ff8aa9}
+.hero h3{color:var(--mute);font-size:13px}
+.hero-icon{display:none}
+.hero-chip{background:none;padding:0;border-radius:0;color:var(--tone)}
+.hero-value{color:var(--tone);font-size:46px;font-variant-numeric:tabular-nums}
+.hero-sub,.hero-empty{color:var(--mute);opacity:1}
+.hero-chart{color:var(--tone);height:72px;margin:12px 0 0}
+.hero-line{stroke:currentColor}
+.hero-peak{background:currentColor;box-shadow:0 0 0 4px color-mix(in srgb,currentColor 18%,transparent)}
+.hero-axis{color:var(--dim);opacity:1;padding:6px 0 0}
+@media(max-width:960px){.hero,.theme-dash.dark .hero{border-left:0;border-top:1px solid var(--line);padding:16px 0 8px}.hero:first-child,.theme-dash.dark .hero:first-child{border-top:0}}
+.databar{display:flex;align-items:center;gap:10px;height:auto;min-width:0;border-radius:0;background:none;overflow:visible}
+.databar b{position:static;padding:0;min-width:2ch;line-height:1.4;color:var(--ink);font-variant-numeric:tabular-nums}
+.databar-track{position:relative;flex:1;height:6px;border-radius:3px;background:var(--tint);overflow:hidden}
+.databar-fill{border-radius:3px}
+.databar-fill.blue{background:#2870e0}
+.databar-fill.pink{background:#cf2f7a}
+.databar-fill.green{background:#087f58}
+.pct-cell{display:block;text-align:left;padding:0;border-radius:0;background:none;color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.heatmap{gap:0}
+.heat-row{align-self:stretch;display:flex;align-items:center;border-top:1px solid var(--line)}
+.heat-box{height:44px;border-radius:0;background:none;border-top:1px solid var(--line);font-size:18px;font-variant-numeric:tabular-nums;color:color-mix(in srgb,var(--blue) calc(35% + var(--a) * 65%),var(--dim))}
+.heat-box.zero{color:var(--dim);font-weight:500;opacity:.6}
+.badge,.badge:is(.active,.pending,.awaiting_feedback,.neutral,.resolved,.positive,.regular,.closed_no_response,.negative,.critical,.level,.prio){background:none;padding:0;border-radius:0}
+.theme-dash.dark .badge,.theme-dash.dark .badge:is(.active,.pending,.awaiting_feedback,.neutral,.resolved,.positive,.negative,.critical,.level,.prio){background:none}
+.badge.prio-critical{color:#b42318;font-weight:700}
+.theme-dash.dark .badge.prio-critical{color:#ff8aa9}
+.tags{gap:12px}
+.data-table td>.badge+.badge{margin-left:10px}
+.ticket-card-list{gap:0}
+.ticket-card+.ticket-card{border-top:1px solid var(--border)}
+.stats.stats-five{border-top:0}
+.stats>.kpi{border-top:3px solid #2b73d8}
+.stats>.kpi.warn{border-top-color:#e8a04a}
+.stats>.kpi.danger{border-top-color:#b42318}
+/* Sem padding no grafico: a bolinha usa top em % da caixa e a curva so do conteudo, e o padding as desalinhava */
+.hero-chart{padding-top:0;margin-top:28px}
+/* O tracejado com pathLength e non-scaling-stroke corta a linha quando o SVG e esticado */
+.hero-line{stroke-dasharray:none;animation:none}
+/* Meio-termo do Gestor: o plano total misturava assuntos; painel com contorno leve, sem sombra */
+.theme-dash .card.chart-card,.theme-dash .card.acc,.theme-dash.dark .card.chart-card,.theme-dash.dark .card.acc{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px 24px}
+.theme-dash .card.acc,.theme-dash.dark .card.acc{padding:0}
+.theme-dash .acc-body .card.chart-card,.theme-dash.dark .acc-body .card.chart-card{background:none;border:0;border-top:1px solid var(--line);border-radius:0;padding:18px 0 4px}
+.theme-dash .dash-12,.theme-dash .dash-grid{gap:20px}
+/* Microinteracoes: curtas e so em cor, sombra, transform e opacity. A regra de reduced-motion do inicio desliga tudo. */
+:root{--ease-out:cubic-bezier(.2,.7,.2,1);--t-fast:.15s;--t-med:.22s;interpolate-size:allow-keywords}
+.layout{transition:grid-template-columns var(--t-med) var(--ease-out)}
+.nav-link{transition:background-color var(--t-fast) ease,color var(--t-fast) ease}
+.nav-link>svg,.nav-link>.icon{transition:transform var(--t-fast) var(--ease-out)}
+.nav-link:hover>svg,.nav-link:hover>.icon{transform:translateX(2px)}
+.btn,.menu-btn,.notification-btn,.logout-btn,.dialog-close,.text-link{transition:background-color var(--t-fast) ease,border-color var(--t-fast) ease,color var(--t-fast) ease,box-shadow var(--t-fast) ease,transform var(--t-fast) var(--ease-out)}
+.btn:not(:disabled):hover{transform:translateY(-1px)}
+.btn-primary:not(:disabled):hover{box-shadow:0 4px 12px rgba(0,73,156,.24)}
+.btn:not(:disabled):active,.menu-btn:active,.notification-btn:active,.logout-btn:active,.dialog-close:active{transform:scale(.97);transition-duration:.06s}
+.text-link svg,.text-link .icon{transition:transform var(--t-fast) var(--ease-out)}
+.text-link:hover svg,.text-link:hover .icon{transform:translateX(3px)}
+input,select,textarea{transition:border-color var(--t-fast) ease,box-shadow var(--t-fast) ease,background-color var(--t-fast) ease}
+.data-table tbody tr>td{transition:background-color var(--t-fast) ease}
+.data-table tbody tr:hover>td{background-color:rgba(0,73,156,.045)}
+.theme-dash.dark .data-table tbody tr:hover>td{background-color:rgba(255,255,255,.045)}
+.acc::details-content{block-size:0;overflow:hidden;transition:block-size var(--t-med) var(--ease-out),content-visibility var(--t-med);transition-behavior:allow-discrete}
+.acc[open]::details-content{block-size:auto}
+/* Entrada so na troca de rota: o render recria a tela a cada acao, entao a classe vem do shell() */
+.page-enter{animation:page-enter .26s var(--ease-out) both}
+@keyframes page-enter{from{opacity:0;transform:translateY(6px)}}
+.toast:not([hidden]){animation:toast-in var(--t-med) var(--ease-out)}
+@keyframes toast-in{from{opacity:0;transform:translate(-50%,10px)}}
+dialog{opacity:0;transform:translateY(10px) scale(.98);transition-property:opacity,transform,display,overlay;transition-duration:var(--t-med);transition-timing-function:var(--ease-out);transition-behavior:allow-discrete}
+dialog[open]{opacity:1;transform:none}
+@starting-style{dialog[open]{opacity:0;transform:translateY(10px) scale(.98)}}
+dialog::backdrop{background-color:rgba(22,57,104,0);transition-property:background-color,display,overlay;transition-duration:var(--t-med);transition-behavior:allow-discrete}
+dialog[open]::backdrop{background-color:#16396880}
+@starting-style{dialog[open]::backdrop{background-color:rgba(22,57,104,0)}}
+.hero-peak b{position:absolute;bottom:calc(100% + 5px);left:50%;transform:translateX(-50%);font-size:12px;font-weight:700;line-height:1;color:currentColor;white-space:nowrap}

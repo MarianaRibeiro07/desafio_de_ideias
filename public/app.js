@@ -56,8 +56,8 @@ async function api(path, options = {}) {
   return json.data;
   } finally { if (mutation) activeMutations--; }
 }
-function demoBanner() { return `<div class="banner" role="note">${icon('20913')}<div><strong>Escuta com apoio de IA.</strong> ${state.data?.analysis?.on_demand ? 'Novos relatos podem ser analisados pelo Gemini. Use somente exemplos fictícios nesta demonstração.' : 'Novos relatos são analisados localmente.'} A base inicial contém exemplos fictícios identificados nos detalhes.</div></div>`; }
 let themeMemory = null;
+let lastShellRoute = null;
 let navMemory = null;
 function navCollapsed() { if (navMemory !== null) return navMemory; try { return localStorage.getItem('cti-menu') === 'recolhido'; } catch { return false; } }
 function dashDark() { if (themeMemory !== null) return themeMemory; try { return localStorage.getItem('cti-tema') === 'escuro'; } catch { return false; } }
@@ -76,8 +76,9 @@ function pageMeta() {
 function shell(content) {
   const { title } = pageMeta();
   const alerts = state.data.notifications || [];
-  app.innerHTML = `<div class="layout${navCollapsed() ? ' nav-collapsed' : ''}"><button class="mobile-backdrop" data-action="menu-close" aria-label="Fechar menu"></button><aside class="sidebar" id="sidebar"><div class="sidebar-brand">${brand()}</div><div class="space-label">Espaço ${esc(roleNames[state.user.role].toLowerCase())}</div><nav class="nav-list" aria-label="Menu principal">${routes[state.user.role].map(([path, label]) => `<a href="#${path}" class="nav-link ${state.route === path ? 'active' : ''}" title="${esc(label)}" ${state.route === path ? 'aria-current="page"' : ''}>${navigationIcon(path)}<span class="nav-label">${esc(label)}</span>${path === 'criticos' && state.data.feedbacks.some(f => f.criticality === 'critical') ? '<span class="nav-mark" aria-label="Há casos críticos"></span>' : ''}</a>`).join('')}</nav><div class="sidebar-bottom"><div class="user-panel"><div class="avatar">${initial()}</div><div><div class="user-name">${esc(state.user.name)}</div><div class="user-role">${esc(roleNames[state.user.role])}</div></div><button class="logout-btn" data-action="logout" title="Sair da conta" aria-label="Sair da conta">${icon('fe916')}</button></div></div></aside><div class="work-area${state.user.role === 'manager' ? ` theme-dash${dashDark() ? ' dark' : ''}` : ''}"><header class="topbar"><div class="button-row"><button type="button" class="menu-btn" data-action="menu" aria-label="${navCollapsed() ? 'Expandir menu' : 'Recolher menu'}" aria-controls="sidebar" aria-expanded="${!navCollapsed()}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg></button><div class="breadcrumb"><strong>${esc(roleNames[state.user.role])}</strong></div></div><div class="header-actions">${state.user.role === 'manager' ? `<button type="button" class="btn theme-toggle" data-action="theme" aria-pressed="${dashDark()}">${dashDark() ? 'Tema claro' : 'Tema escuro'}</button>` : `<button class="notification-btn" data-action="notifications" aria-label="Alertas e lembretes${alerts.length ? `: ${alerts.length}` : ''}" title="Alertas e lembretes">◷${alerts.length ? `<span id="notification-count" class="notification-count">${alerts.length}</span>` : ''}</button>`}<div class="avatar">${initial()}</div></div></header><main id="main" class="main"><div class="page-heading"><div><h1>${esc(title)}<span class="dot">.</span></h1></div>${['manager', 'supervisor'].includes(state.user.role) ? `<div class="date-pill">${icon('2fbac', 15)}${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}</div>` : ''}</div>${demoBanner()}<div id="page-content">${content}</div></main></div></div>`;
+  app.innerHTML = `<div class="layout${navCollapsed() ? ' nav-collapsed' : ''}"><button class="mobile-backdrop" data-action="menu-close" aria-label="Fechar menu"></button><aside class="sidebar" id="sidebar"><div class="sidebar-brand">${brand()}</div><div class="space-label">Espaço ${esc(roleNames[state.user.role].toLowerCase())}</div><nav class="nav-list" aria-label="Menu principal">${routes[state.user.role].map(([path, label]) => `<a href="#${path}" class="nav-link ${state.route === path ? 'active' : ''}" title="${esc(label)}" ${state.route === path ? 'aria-current="page"' : ''}>${navigationIcon(path)}<span class="nav-label">${esc(label)}</span>${path === 'criticos' && state.data.feedbacks.some(f => f.criticality === 'critical') ? '<span class="nav-mark" aria-label="Há casos críticos"></span>' : ''}</a>`).join('')}</nav><div class="sidebar-bottom"><div class="user-panel"><div class="avatar">${initial()}</div><div><div class="user-name">${esc(state.user.name)}</div><div class="user-role">${esc(roleNames[state.user.role])}</div></div><button class="logout-btn" data-action="logout" title="Sair da conta" aria-label="Sair da conta">${icon('fe916')}</button></div></div></aside><div class="work-area${state.user.role === 'manager' ? ` theme-dash${dashDark() ? ' dark' : ''}` : ''}"><header class="topbar"><div class="button-row"><button type="button" class="menu-btn" data-action="menu" aria-label="${navCollapsed() ? 'Expandir menu' : 'Recolher menu'}" aria-controls="sidebar" aria-expanded="${!navCollapsed()}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg></button><div class="breadcrumb"><strong>${esc(roleNames[state.user.role])}</strong></div></div><div class="header-actions">${state.user.role === 'manager' ? `<button type="button" class="btn theme-toggle" data-action="theme" aria-pressed="${dashDark()}">${dashDark() ? 'Tema claro' : 'Tema escuro'}</button>` : `<button class="notification-btn" data-action="notifications" aria-label="Alertas e lembretes${alerts.length ? `: ${alerts.length}` : ''}" title="Alertas e lembretes">◷${alerts.length ? `<span id="notification-count" class="notification-count">${alerts.length}</span>` : ''}</button>`}<div class="avatar">${initial()}</div></div></header><main id="main" class="main"><div class="page-heading"><div><h1>${esc(title)}<span class="dot">.</span></h1></div>${['manager', 'supervisor'].includes(state.user.role) ? `<div class="date-pill">${icon('2fbac', 15)}${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}</div>` : ''}</div><div id="page-content">${content}</div></main></div></div>`;
   document.title = `${title} | CTI Escuta`;
+  if (state.route !== lastShellRoute) { lastShellRoute = state.route; document.querySelector('#page-content').classList.add('page-enter'); }
 }
 async function refreshData() { state.data = await api('/bootstrap'); state.user = state.data.user || state.user; }
 function loadHostedQueue() {
@@ -145,7 +146,7 @@ async function render() {
   else if (state.route === 'criticos') shell(criticalPage());
   else if (state.route === 'equipe') { shell(usersPage()); await loadUsers(id); }
   else if (state.route === 'supervisores') { shell(usersPage()); await loadUsers(id); }
-  else { shell(`<div class="card loading-card"><span class="spinner"></span>Calculando os indicadores do banco...</div>`); try { state.report = await api(`/reports?${new URLSearchParams(state.filters)}`); if (id !== state.renderId) return; showReport(); } catch (error) { if (id === state.renderId) document.querySelector('#page-content').innerHTML = `<div class="inline-error" role="alert">${esc(error.message)}</div>`; } }
+  else { shell(`<div class="card loading-card"><span class="spinner"></span>Calculando os indicadores do banco...</div>`); try { state.report = await api(`/reports?${new URLSearchParams(state.filters)}`); if (id !== state.renderId) return; showReport(); const pc = document.querySelector('#page-content'); if (pc.classList.contains('page-enter')) { pc.classList.remove('page-enter'); void pc.offsetWidth; pc.classList.add('page-enter'); } } catch (error) { if (id === state.renderId) document.querySelector('#page-content').innerHTML = `<div class="inline-error" role="alert">${esc(error.message)}</div>`; } }
 }
 function ticketFeedback(ticket) { return state.data.feedbacks.find(f => Number(f.ticket_id) === Number(ticket.id) && (f.attempt === undefined || ticket.solution_attempt === undefined || Number(f.attempt) === Number(ticket.solution_attempt))); }
 function canFeedback(ticket) { return ticket.status === 'awaiting_feedback' && !ticketFeedback(ticket); }
@@ -526,12 +527,6 @@ const dashPriority = { low: '#7dd3fc', medium: '#4c9bff', high: '#fbbf24', criti
 const dashDeadline = [['on_time', 'No prazo', '#34d399'], ['late', 'Fora do prazo', '#fbbf24'], ['awaiting_on_time', 'Aguardando no prazo', '#60a5fa'], ['overdue', 'Vencido', '#ff5c7a']];
 const dashPalette = ['#4c9bff', '#34d399', '#ff6b9a', '#fbbf24', '#a78bfa', '#7dd3fc'];
 let chartSeq = 0;
-function mixColor(from, to, t) {
-  const a = [1, 3, 5].map(i => parseInt(from.slice(i, i + 2), 16));
-  const b = [1, 3, 5].map(i => parseInt(to.slice(i, i + 2), 16));
-  const k = Math.min(1, Math.max(0, t));
-  return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * k)).join(',')})`;
-}
 function dashTickets() {
   const f = state.filters;
   const tickets = scopedTickets();
@@ -605,7 +600,7 @@ function miniArea(values, labels, label) {
   const peak = values.indexOf(Math.max(...values));
   const id = `mini${++chartSeq}`;
   const ticks = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
-  return `<div class="hero-chart" role="img" aria-label="${esc(label)}"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true" focusable="false"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><path class="hero-fill" d="${line} L${W},${H} L0,${H} Z" fill="url(#${id})"/><path class="hero-line" d="${line}" pathLength="1"/></svg><span class="hero-peak" style="left:${(pts[peak].x / W * 100).toFixed(1)}%;top:${(pts[peak].y / H * 100).toFixed(1)}%"></span></div><div class="hero-axis" aria-hidden="true">${ticks.map(i => `<span>${esc(labels[i])}</span>`).join('')}</div>`;
+  return `<div class="hero-chart" role="img" aria-label="${esc(label)}"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true" focusable="false"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity=".22"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs><path class="hero-fill" d="${line} L${W},${H} L0,${H} Z" fill="url(#${id})"/><path class="hero-line" d="${line}" pathLength="1"/></svg><span class="hero-peak" style="left:${(pts[peak].x / W * 100).toFixed(1)}%;top:${(pts[peak].y / H * 100).toFixed(1)}%"><b>${esc(values[peak])}</b></span></div><div class="hero-axis" aria-hidden="true">${ticks.map(i => `<span>${esc(labels[i])}</span>`).join('')}</div>`;
 }
 function heroCard(tone, title, value, chip, sub, series, key, iconKey) {
   const body = series.length >= 2 ? miniArea(series.map(p => p[key]), series.map(p => p.label), `${title} por ${series.length && series[1] && series[1].range.includes(' a ') ? 'semana' : 'dia'}, de ${series[0].label} a ${series.at(-1).label}: ${series.map(p => `${p.label} ${p[key]}`).join(', ')}`) : `<p class="hero-empty">Ainda não há dias suficientes para desenhar a curva.</p>`;
@@ -628,7 +623,7 @@ function kpiStrip(r, withReceived = false) {
 }
 function dataBar(value, max, tone, text = value) {
   const width = max && value ? Math.max(5, value / max * 100) : 0;
-  return `<div class="databar"><span class="databar-fill ${tone}" style="width:${width.toFixed(1)}%"></span><b>${esc(text)}</b></div>`;
+  return `<div class="databar"><b>${esc(text)}</b><span class="databar-track"><span class="databar-fill ${tone}" style="width:${width.toFixed(1)}%"></span></span></div>`;
 }
 function channelStats() {
   const tickets = ticketMap();
@@ -648,7 +643,7 @@ function channelTablePanel() {
   const maxR = Math.max(...rows.map(x => x.received), 1);
   const maxN = Math.max(...rows.map(x => x.negative), 1);
   const cols = [{ h: 'Canal', cls: 'col-main' }, { h: 'Recebidos' }, { h: 'Negativos' }, { h: '% negativos' }];
-  const body = dtable(cols, rows.map(x => { const p = Math.round(x.negative / x.received * 100); return [`<strong>${esc(x.label)}</strong>`, dataBar(x.received, maxR, 'blue'), dataBar(x.negative, maxN, 'pink'), `<span class="pct-cell" style="background:${mixColor('#17356a', '#cf2f7a', p / 100)}">${p}%</span>`]; }), 'databar-table');
+  const body = dtable(cols, rows.map(x => { const p = Math.round(x.negative / x.received * 100); return [`<strong>${esc(x.label)}</strong>`, dataBar(x.received, maxR, 'blue'), dataBar(x.negative, maxN, 'pink'), `<span class="pct-cell">${p}%</span>`]; }), 'databar-table');
   return panel('Canais de atendimento', 'Feedbacks recebidos e negativos por canal', `<div class="table-wrap">${body}</div>`, 's7');
 }
 function prioritySentimentPanel() {
@@ -681,7 +676,7 @@ function levelPriorityHeat() {
   const grid = [1, 2, 3].map(level => keys.map(p => cell(level, p)));
   const max = Math.max(...grid.flat(), 1);
   const summary = grid.map((row, i) => `N${i + 1}: ${row.map((v, j) => `${priorityNames[keys[j]]} ${v}`).join(', ')}`).join('; ');
-  const body = `<div class="heatmap" role="img" aria-label="${esc(`Atendimentos por nível de suporte e prioridade. ${summary}`)}"><span></span>${keys.map(p => `<span class="heat-col">${priorityNames[p]}</span>`).join('')}${grid.map((row, i) => `<span class="heat-row">N${i + 1}</span>${row.map((v, j) => `<span class="heat-box" style="background:${mixColor('#142d5c', '#2870e0', v / max)};${v ? '' : 'color:#8ea3c9'}" title="${esc(`N${i + 1}, ${priorityNames[keys[j]]}: ${v} atendimentos`)}">${v}</span>`).join('')}`).join('')}</div>`;
+  const body = `<div class="heatmap" role="img" aria-label="${esc(`Atendimentos por nível de suporte e prioridade. ${summary}`)}"><span></span>${keys.map(p => `<span class="heat-col">${priorityNames[p]}</span>`).join('')}${grid.map((row, i) => `<span class="heat-row">N${i + 1}</span>${row.map((v, j) => `<span class="heat-box${v ? '' : ' zero'}" style="--a:${(v / max).toFixed(2)}" title="${esc(`N${i + 1}, ${priorityNames[keys[j]]}: ${v} atendimentos`)}">${v}</span>`).join('')}`).join('')}</div>`;
   return panel('Nível de suporte', 'Atendimentos por nível e prioridade', body, 's4');
 }
 function overviewPage(r) {
@@ -851,7 +846,7 @@ function managerPage(r) {
   }[state.route];
   const [title, subtitle, build] = meta;
   const band = `<div class="dash-band"><div class="dash-title"><span class="dash-kicker">${esc(periodText())}</span><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div>${dashFilters()}</div>`;
-  return `${band}<div id="report-results">${build(r)}</div><p class="report-note dash-note">${state.route === 'relatorios' ? 'O CSV respeita os filtros e o seu escopo de acesso. Encerrados sem retorno não contam como resolvidos.' : 'A IA apoia a avaliação humana. Os detalhes distinguem resultados do modelo, avaliações por nota e exemplos de demonstração.'}</p>`;
+  return `${band}<div id="report-results">${build(r)}</div>${state.route === 'relatorios' ? '<p class="report-note dash-note">Encerrados sem retorno não contam como resolvidos.</p>' : ''}`;
 }
 function ticketProtocol(ticketId, fallback) { return state.data.tickets.find(t => Number(t.id) === Number(ticketId))?.protocol || fallback; }
 function interventionCases() {
@@ -898,11 +893,11 @@ function reportPage() {
   const title = supervisor ? 'Fila de intervenção da equipe' : 'Seus atendimentos em perspectiva';
   const subtitle = supervisor ? '' : 'Indicadores dos atendimentos que você registrou e dos feedbacks que eles receberam.';
   const heading = `<div class="section-head"><div><h2>${title}</h2>${subtitle ? `<p>${subtitle}</p>` : ''}</div><a href="/api/reports/export?${esc(new URLSearchParams(state.filters))}" class="btn" download>Exportar atendimentos filtrados ${icon('dabc1', 15)}</a></div>`;
-  if (supervisor) return `${heading}${supervisorDashboard(r)}<p class="report-note" style="margin-top:20px">A IA apoia a avaliação humana. Os detalhes distinguem resultados do modelo, avaliações por nota e exemplos de demonstração.</p>`;
+  if (supervisor) return `${heading}${supervisorDashboard(r)}`;
   const periodNote = '<p class="report-note period-note">Período: os atendimentos são contados pela data de abertura e os feedbacks pela data de recebimento. Por isso os totais podem diferir dentro do mesmo período.</p>';
   const overdue = `<div class="section-head"><div><h2>Prazos que precisam de atenção</h2><p>Lembretes para responder ao cliente.</p></div></div><div class="card table-wrap">${r.response_overdue?.length ? dtable([{ h: 'Atendimento', cls: 'col-main' }, { h: 'Assunto', cls: 'col-secondary' }, { h: 'Prazo' }, { h: 'Ação', cls: 'action-col' }], r.response_overdue.map(t => [`<strong>${esc(t.protocol)}</strong>${ticketTags(t)}`, clip(t.subject), `<span class="negative-text">${date(t.response_due_at, true)}</span>`, link('Responder →', `registrar?id=${t.id}`, 'text-link')]), 'table-priority') : empty('Nenhum prazo de resposta em atraso.', 'Quando um prazo vencer, o atendimento aparece aqui com a ação de responder.')}</div>`;
   const results = `${dashGrid(deadlinePanel(r), priorityPanel(r), levelPanel(r))}${trendPanel(r)}<div class="stack gap-sm" style="margin-top:20px">${acc('Assuntos e resolução', 'Temas dos feedbacks e andamento dos atendimentos', topicsAndCare(r))}</div>${overdue}<div style="margin-top:20px">${reportInfo()}</div>`;
-  return `${heading}${periodNote}${filtersForm()}${statistics(r)}<div id="report-results">${results}</div><p class="report-note" style="margin-top:20px">A IA apoia a avaliação humana. Os detalhes distinguem resultados do modelo, avaliações por nota e exemplos de demonstração.</p>`;
+  return `${heading}${periodNote}${filtersForm()}${statistics(r)}<div id="report-results">${results}</div>`;
 }
 function criticalReport(r) {
   const items = r.critical_cases || [];
