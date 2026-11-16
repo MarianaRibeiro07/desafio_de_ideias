@@ -455,7 +455,7 @@
 /* Redesign etapa 1: tela plana; estrutura por filete e espaco, nao por caixa */
 :root{--bg:#fff}
 .theme-dash{--bg:#fff}
-body,.layout,.layout>div,.content{background:#fff}
+body,.layout,.content{background:#fff}
 .theme-dash.dark,.theme-dash.dark body{--bg:#071530}
 .card{background:transparent;border:0;border-radius:0;box-shadow:none;overflow:visible;max-width:none}
 .card.table-wrap{border-top:1px solid var(--border);border-bottom:1px solid var(--border);overflow:auto}
